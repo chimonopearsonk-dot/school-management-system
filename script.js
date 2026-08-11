@@ -9634,3 +9634,4 @@ window.showToast = showToast;
 window.closeModal = closeModal;
 window.addNewRecord = addNewRecord;
 window.DataService = DataService;
+window.renderLoginForm = showLoginPage;
