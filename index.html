@@ -10,14 +10,13 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="styles.css">
     <meta http-equiv="Content-Security-Policy" content="
-    default-src 'self';
-    script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'unsafe-inline' 'unsafe-eval';
-    style-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'unsafe-inline';
-    font-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net data:;
-    img-src 'self' data:;
-    connect-src 'self';
-    frame-src 'none';
-    form-action 'self';">
+    default-src 'self' data: gap: https://ssl.gstatic.com;
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.tailwindcss.com;
+    style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com;
+    font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com;
+    img-src 'self' data: blob: https:;
+    connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://firestore.googleapis.com wss://*.firebaseio.com https://cdn.jsdelivr.net;
+">
     <!-- SheetJS (XLSX) for Excel Export -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
     <a href="results-portal.html" class="text-indigo-300 hover:text-white transition text-sm">

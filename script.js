@@ -108,6 +108,24 @@ function showToast(message, type = 'info') {
 
 // Firestore-backed Data Helper
 const DataService = {
+    get(key) {
+        try {
+            const data = localStorage.getItem(key);
+            return data ? JSON.parse(data) : [];
+        } catch (e) {
+            console.warn(`DataService.get error for key "${key}":`, e);
+            return [];
+        }
+    },
+
+    // Save to localStorage (fallback)
+    set(key, data) {
+        try {
+            localStorage.setItem(key, JSON.stringify(data));
+        } catch (e) {
+            console.error("DataService.set error:", e);
+        }
+    },
     // Fetch all students from Cloud Firestore
     async getStudents() {
         try {
