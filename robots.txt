@@ -1,0 +1,13 @@
+# Block search engine indexing for the results portal
+User-agent: Googlebot
+Disallow: /results-portal.html
+
+User-agent: Bingbot
+Disallow: /results-portal.html
+
+User-agent: FacebookBot
+Disallow: /results-portal.html
+
+User-agent: *
+Disallow: /results-portal.html
+Allow: /

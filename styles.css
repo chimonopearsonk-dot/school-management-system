@@ -1,0 +1,225 @@
+/* ====================== BASIC STYLES ====================== */
+body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.nav-link {
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.nav-link.active {
+    background-color: rgb(30 27 75);
+    color: white;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table th, .table td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.table th {
+    background-color: #f8fafc;
+    font-weight: 600;
+    color: #374151;
+}
+
+.card {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+
+/* ====================== SIDEBAR COLLAPSE ====================== */
+#sidebar{
+
+    width:260px;
+    min-width:260px;
+    max-width:260px;
+
+    flex:0 0 260px;
+
+    overflow:hidden;
+
+    transition:
+        width .3s,
+        min-width .3s,
+        max-width .3s,
+        flex-basis .3s;
+
+}
+
+#sidebar.collapsed{
+
+    width:72px;
+    min-width:72px;
+    max-width:72px;
+
+    flex:0 0 72px;
+
+}
+
+/* Hide text when collapsed */
+#sidebar h1,
+#sidebar p,
+#sidebar .nav-link span,
+#user-info{
+transition:.25s;
+
+}
+
+#sidebar.collapsed h1,
+#sidebar.collapsed p,
+#sidebar.collapsed .nav-link span,
+#sidebar.collapsed #user-info{
+
+    opacity:0;
+
+    width:0;
+
+    overflow:hidden;
+
+    pointer-events:none;
+
+}
+
+#sidebar.collapsed .nav-link {
+    justify-content: center !important;
+    padding: 12px 20px !important;
+}
+
+#sidebar.collapsed #user-profile {
+    padding: 16px 12px !important;
+}
+
+#sidebar.collapsed #user-profile > div {
+    justify-content: center;
+}
+
+/* Icons in collapsed mode */
+#sidebar.collapsed .nav-link i {
+    font-size: 1.3rem;
+    margin-right: 0;
+}
+
+/* Collapse Button */
+#sidebar-collapse {
+    transition: all 0.3s ease;
+}
+
+/* ====================== MOBILE ====================== */
+@media (max-width: 1024px) {
+    #sidebar {
+        position: fixed;
+        left: -280px;
+        z-index: 50;
+        height: 100vh;
+        box-shadow: 4px 0 15px rgba(0,0,0,0.2);
+    }
+    
+    #sidebar.mobile-open {
+        left: 0 !important;
+    }
+}
+
+/* Toast */
+.toast-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+/* Remove number input spinners from score inputs only */
+.score-input::-webkit-outer-spin-button,
+.score-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.score-input {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+/* Also remove spinners from CA score inputs */
+.ca-input::-webkit-outer-spin-button,
+.ca-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.ca-input {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+/* Sidebar collapse button - ensure it's fully visible */
+#sidebar-collapse {
+    position: absolute;
+    right: -16px; /* Move it further right to be fully visible */
+    top: 12px;
+    z-index: 50; /* Ensure it's above everything */
+    background-color: #4f46e5;
+    border: 2px solid white;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+#sidebar-collapse:hover {
+    transform: scale(1.15);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+#sidebar-collapse i {
+    color: white;
+    font-size: 14px;
+}
+
+/* When sidebar is collapsed */
+#sidebar.collapsed #sidebar-collapse {
+    right: -12px;
+}
+
+#sidebar.collapsed #collapse-icon {
+    transform: rotate(180deg);
+}
+@media print {
+    /* Hide navigation, sidebar, action buttons, and popups during print */
+    nav, sidebar, .no-print, button, #modal, #toast-container {
+        display: none !important;
+    }
+
+    body {
+        background: #fff !important;
+        color: #000 !important;
+    }
+
+    table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+    }
+
+    th, td {
+        border: 1px solid #ddd !important;
+        padding: 8px !important;
+    }
+}
