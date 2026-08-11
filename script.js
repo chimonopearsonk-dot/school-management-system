@@ -106,8 +106,15 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
-// Firestore-backed Data Helper
 const DataService = {
+    // Generate standard student ID (e.g. BAGSS/2026/001 or fallback timestamp)
+    generateId(prefix = 'BAGSS', year = new Date().getFullYear()) {
+        const timestamp = Date.now().toString().slice(-4);
+        const randomDigits = Math.floor(100 + Math.random() * 900);
+        return `${prefix}/${year}/${timestamp}${randomDigits}`;
+    },
+
+    // Legacy helper
     get(key) {
         try {
             const data = localStorage.getItem(key);
@@ -118,7 +125,7 @@ const DataService = {
         }
     },
 
-    // Save to localStorage (fallback)
+    // Save to localStorage
     set(key, data) {
         try {
             localStorage.setItem(key, JSON.stringify(data));
@@ -126,14 +133,18 @@ const DataService = {
             console.error("DataService.set error:", e);
         }
     },
-    // Fetch all students from Cloud Firestore
+
+    // Cloud Firestore Async Fetch
     async getStudents() {
         try {
-            const snapshot = await db.collection('students').get();
-            return snapshot.docs.map(doc => ({ firebaseDocId: doc.id, ...doc.data() }));
+            if (typeof db !== 'undefined' && db) {
+                const snapshot = await db.collection('students').get();
+                return snapshot.docs.map(doc => ({ firebaseDocId: doc.id, ...doc.data() }));
+            }
+            return this.get('students');
         } catch (error) {
-            console.error("Error fetching students from cloud:", error);
-            return [];
+            console.error("Error fetching students from cloud, falling back to local:", error);
+            return this.get('students');
         }
     }
 };
