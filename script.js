@@ -168,6 +168,43 @@ const DataAccess = {
     }
 };
 
+// Firestore Helper Functions for Single Student Operations
+const FirestoreService = {
+    // Helper to turn Student ID into a valid Firestore Document Path
+    getDocRef(studentId) {
+        if (!studentId) return null;
+        const safeId = studentId.toString().trim().replace(/\//g, '_');
+        return db.collection('students').doc(safeId);
+    },
+
+    // Save or update a single student in Firestore
+    async saveStudent(studentData) {
+        try {
+            const docRef = this.getDocRef(studentData.id);
+            await docRef.set({
+                ...studentData,
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+            return true;
+        } catch (error) {
+            console.error("Error saving student to Firestore:", error);
+            return false;
+        }
+    },
+
+    // Delete a student from Firestore (if needed)
+    async deleteStudent(studentId) {
+        try {
+            const docRef = this.getDocRef(studentId);
+            await docRef.delete();
+            return true;
+        } catch (error) {
+            console.error("Error deleting student from Firestore:", error);
+            return false;
+        }
+    }
+};
+
 // Data Migration Script for Existing Students
 (function migrateStudentData() {
     const students = DataService.get('students', []);
@@ -724,57 +761,30 @@ function openPhoneUpdateModal(studentId) {
     };
 }
 
-function processPhoneUpdate(studentId) {
-    const newPhone = document.getElementById('new-phone').value.trim();
-    const reason = document.getElementById('phone-change-reason').value;
-    const notes = document.getElementById('phone-change-notes').value.trim();
-    
-    if (!validatePhoneNumber(newPhone)) {
-        showToast('Please enter a valid phone number', 'error');
-        return;
+
+// Update Parent Phone Number
+async function handleUpdatePhone(event, studentId) {
+    if (event) event.preventDefault();
+
+    const phoneInput = document.getElementById('update-parent-phone');
+    if (!phoneInput) return;
+
+    const newPhone = phoneInput.value.trim();
+
+    const success = await FirestoreService.saveStudent({
+        id: studentId,
+        parentPhone: newPhone
+    });
+
+    if (success) {
+        showToast('Parent phone updated successfully!', 'success');
+        closeModal();
+
+        const container = document.getElementById('main-content') || document.getElementById('student-registry-container');
+        if (container) renderStudentRegistry(container);
+    } else {
+        showToast('Failed to update phone number in cloud.', 'error');
     }
-    
-    const students = DataService.get('students');
-    const student = students.find(s => s.id === studentId);
-    
-    if (!student) {
-        showToast('Student not found!', 'error');
-        return;
-    }
-    
-    // Check if phone already in use
-    const existing = students.find(s => s.parentPhone && comparePhoneNumbers(s.parentPhone, newPhone) && s.id !== studentId);
-    if (existing) {
-        if (!confirm(`This phone is already linked to ${existing.name}. Continue anyway?`)) {
-            return;
-        }
-    }
-    
-    // Update the phone
-    const oldPhone = student.parentPhone;
-    student.parentPhone = newPhone;
-    
-    // Log the change
-    const phoneUpdateLog = {
-        studentId: student.id,
-        studentName: student.name,
-        oldPhone: oldPhone,
-        newPhone: newPhone,
-        reason: reason,
-        notes: notes,
-        updatedBy: currentUser?.name || 'System',
-        updatedAt: new Date().toISOString()
-    };
-    
-    // Store in phone update history
-    let phoneHistory = DataService.get('phoneUpdateHistory') || [];
-    phoneHistory.push(phoneUpdateLog);
-    DataService.set('phoneUpdateHistory', phoneHistory);
-    
-    DataService.set('students', students);
-    closeModal();
-    showToast(`Phone updated successfully for ${student.name}`, 'success');
-    Router.refresh();
 }
 
 /**
@@ -1390,60 +1400,47 @@ function showAddStudentModal() {
     document.getElementById('studentForm').onsubmit = saveStudent;
 }
 
+// Add or Save Single Student
+async function handleSaveStudent(event) {
+    if (event) event.preventDefault();
 
-function saveStudent(e) {
-    e.preventDefault();
-    
-    const name = document.getElementById('sname').value.trim();
-    const studentClass = document.getElementById('sclass').value.trim();
-    const sex = document.getElementById('ssex').value;
-    const age = parseInt(document.getElementById('sage').value, 10);
-    const parentPhone = document.getElementById('sparent-phone').value.trim();
-    const admissionYear = parseInt(document.getElementById('sadmission-year').value, 10) || new Date().getFullYear();
+    const studentIdInput = document.getElementById('student-id');
+    const nameInput = document.getElementById('student-name');
+    const classInput = document.getElementById('student-class');
+    const phoneInput = document.getElementById('student-phone');
+    const statusInput = document.getElementById('student-status');
 
-    if (!name || !studentClass || !sex || isNaN(age) || !parentPhone) {
-        showToast('Please fill all required fields.', 'error');
+    if (!nameInput?.value || !classInput?.value) {
+        showToast('Please fill in required fields (Name and Class)', 'error');
         return;
     }
 
-    let students = DataService.get('students') || [];
+    // Use existing ID or generate new standard ID
+    const studentId = studentIdInput?.value?.trim() || DataService.generateId('BAGSS');
 
-    if (currentEditingId) {
-        const index = students.findIndex(s => s.id === currentEditingId);
-        if (index !== -1) {
-            students[index] = {
-                ...students[index],
-                name,
-                class: studentClass,
-                sex,
-                age,
-                parentPhone,
-                admissionYear
-            };
-            showToast('Student updated successfully!', 'success');
-        }
+    const studentData = {
+        id: studentId,
+        name: nameInput.value.trim(),
+        class: classInput.value.trim(),
+        parentPhone: phoneInput ? phoneInput.value.trim() : '',
+        status: statusInput ? statusInput.value : 'Active',
+        entryDate: new Date().toISOString().split('T')[0]
+    };
+
+    // Save directly to Firestore
+    const success = await FirestoreService.saveStudent(studentData);
+
+    if (success) {
+        showToast(`Student ${studentData.name} saved successfully!`, 'success');
+        closeModal();
+        
+        // Refresh live UI
+        const container = document.getElementById('main-content') || document.getElementById('student-registry-container');
+        if (container) renderStudentRegistry(container);
     } else {
-        const newId = generatePermanentStudentId(admissionYear, false);
-        const newStudent = {
-            id: newId,
-            name,
-            class: studentClass,
-            sex,
-            age,
-            parentPhone,
-            admissionYear,
-            admissionDate: new Date().toISOString().split('T')[0],
-            status: 'Active'
-        };
-        students.push(newStudent);
-        showToast(`Student registered successfully! ID: ${newId}`, 'success');
+        showToast('Failed to save student to cloud database.', 'error');
     }
-
-    DataService.set('students', students);
-    closeModal();
-    if (typeof Router !== 'undefined' && Router.refresh) Router.refresh();
 }
-
 /**
  * Opens edit modal for an existing student.
  */
@@ -1777,97 +1774,51 @@ function showTransferOutModal(studentId) {
     };
 }
 
-/**
- * Saves Transfer Out transaction details and logs history.
- */
-function processTransferOut(studentId) {
-    const school = document.getElementById('transfer-to-school').value.trim();
-    const date = document.getElementById('transfer-out-date').value;
-    const reason = document.getElementById('transfer-reason').value;
-    const notes = document.getElementById('transfer-notes').value.trim();
-    
-    if (!school) {
-        showToast('Please enter the school name', 'error');
-        return;
-    }
-    
-    const students = DataService.get('students') || [];
-    const student = students.find(s => s.id === studentId);
-    
-    if (!student) {
-        showToast('Student not found!', 'error');
-        return;
-    }
-    
-    // Update status
-    student.status = 'Left';
-    student.exitDate = date || new Date().toISOString().split('T')[0];
-    student.transferTo = school;
-    student.transferReason = reason;
-    student.transferNotes = notes;
-    student.transferredOutAt = new Date().toISOString();
-    
-    // Log transfer history
-    let transferHistory = DataService.get('transferHistory') || [];
-    transferHistory.push({
-        studentId: student.id,
-        studentName: student.name,
-        transferTo: school,
-        transferDate: student.exitDate,
-        reason: reason,
-        notes: notes,
-        processedBy: (typeof currentUser !== 'undefined' && currentUser?.name) ? currentUser.name : 'Admin',
-        processedAt: new Date().toISOString()
+// Transfer Out (Mark Student as Left)
+async function handleTransferOut(studentId) {
+    const reasonInput = document.getElementById('transfer-out-reason');
+    const exitDateInput = document.getElementById('transfer-out-date');
+
+    const exitReason = reasonInput ? reasonInput.value.trim() : 'Transferred Out';
+    const exitDate = exitDateInput ? exitDateInput.value : new Date().toISOString().split('T')[0];
+
+    const success = await FirestoreService.saveStudent({
+        id: studentId,
+        status: 'Left',
+        exitReason: exitReason,
+        exitDate: exitDate
     });
-    
-    DataService.set('transferHistory', transferHistory);
-    DataService.set('students', students);
-    
-    closeModal();
-    showToast(`${student.name} transferred out to ${school}`, 'success');
-    if (typeof Router !== 'undefined' && Router.refresh) Router.refresh();
+
+    if (success) {
+        showToast('Student status updated to Left.', 'success');
+        closeModal();
+
+        const container = document.getElementById('main-content') || document.getElementById('student-registry-container');
+        if (container) renderStudentRegistry(container);
+    } else {
+        showToast('Failed to update status in cloud.', 'error');
+    }
 }
 
-/**
- * Quickly marks a student as left without detailed school history.
- */
-function markStudentLeft(studentId) {
-    const students = DataService.get('students') || [];
-    const student = students.find(s => s.id === studentId);
-    
-    if (!student) {
-        showToast('Student not found!', 'error');
-        return;
-    }
+// Reactivate Student
+async function reactivateStudent(studentId) {
+    if (!confirm(`Are you sure you want to reactivate student ID: ${studentId}?`)) return;
 
-    if (!confirm(`Mark ${student.name} as left/transferred out?`)) {
-        return;
-    }
-    
-    student.status = 'Left';
-    student.exitDate = new Date().toISOString().split('T')[0];
-    DataService.set('students', students);
-    showToast(`${student.name} marked as left.`, 'success');
-    if (typeof Router !== 'undefined' && Router.refresh) Router.refresh();
-}
+    const success = await FirestoreService.saveStudent({
+        id: studentId,
+        status: 'Active',
+        exitReason: null,
+        exitDate: null
+    });
 
-/**
- * Reactivates a former student.
- */
-function reactivateStudent(studentId) {
-    const students = DataService.get('students') || [];
-    const student = students.find(s => s.id === studentId);
-    
-    if (!student) {
-        showToast('Student not found!', 'error');
-        return;
+    if (success) {
+        showToast('Student reactivated successfully!', 'success');
+
+        const container = document.getElementById('main-content') || document.getElementById('student-registry-container');
+        if (container) renderStudentRegistry(container);
+    } else {
+        showToast('Failed to reactivate student.', 'error');
     }
-    
-    student.status = 'Active';
-    delete student.exitDate;
-    DataService.set('students', students);
-    showToast(`${student.name} reactivated.`, 'success');
-    if (typeof Router !== 'undefined' && Router.refresh) Router.refresh();
 }
 
 // ============================================================================
