@@ -9598,42 +9598,311 @@ function setupSidebar() {
 }
 
 // ============================================
-// INITIALIZATION
+// COMPLETE APP INITIALIZATION & AUTH SYSTEM
 // ============================================
-// Global Session Listener & Route Protection
-document.addEventListener('DOMContentLoaded', () => {
-    const mainContainer = document.getElementById('main-content') || document.getElementById('app');
 
-    auth.onAuthStateChanged((user) => {
-        const userHeaderInfo = document.getElementById('user-header-info');
-        
-        if (user) {
-            // User is signed in: show app header elements & registry
-            if (userHeaderInfo) {
-                userHeaderInfo.innerHTML = `
-                    <div class="flex items-center gap-3">
-                        <span class="text-sm font-medium text-gray-700"><i class="fas fa-user-circle mr-1 text-indigo-600"></i> ${escapeHtml(user.email)}</span>
-                        <button onclick="handleLogout()" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 border border-gray-300" title="Sign Out">
-                            <i class="fas fa-sign-out-alt"></i> Logout
-                        </button>
-                    </div>
-                `;
-            }
-            // Load dashboard
-            renderStudentRegistry(mainContainer);
-        } else {
-            // User is signed out: hide navbar info & display login form
-            if (userHeaderInfo) userHeaderInfo.innerHTML = '';
-            renderLoginForm(mainContainer);
+let currentUser = null;
+
+/**
+ * Main Application Startup Function
+ * Restores sidebar, navigation, seed data, and router initialization
+ */
+async function initApp() {
+    if (!checkAuth()) {
+        showLoginPage();
+        return;
+    }
+
+    // 1. Update user details in header & sidebar
+    updateUserProfile();
+
+    // 2. Restore sidebar & navigation handlers
+    if (typeof setupNavigation === 'function') setupNavigation();
+    if (typeof setupSidebar === 'function') setupSidebar();
+    if (typeof seedData === 'function') seedData();
+
+    // 3. Re-attach Add New Record button listener
+    const addBtn = document.getElementById('add-new-btn');
+    if (addBtn) {
+        const newBtn = addBtn.cloneNode(true);
+        if (addBtn.parentNode) {
+            addBtn.parentNode.replaceChild(newBtn, addBtn);
         }
-    });
+        if (typeof addNewRecord === 'function') {
+            newBtn.addEventListener('click', addNewRecord);
+        }
+    }
+
+    // 4. Modal background click listener
+    const modal = document.getElementById('modal');
+    if (modal) {
+        modal.addEventListener('click', function(e) {
+            if (e.target === this && typeof closeModal === 'function') {
+                closeModal();
+            }
+        });
+    }
+
+    // 5. Navigate to Dashboard view
+    if (typeof Router !== 'undefined' && Router.navigate) {
+        Router.navigate('dashboard');
+    }
+}
+
+/**
+ * Show Fullscreen Login Page
+ */
+function showLoginPage() {
+    document.body.innerHTML = `
+        <div class="min-h-screen bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
+                <div class="text-center mb-8">
+                    <h1 class="text-2xl font-bold text-gray-800">Bandawe Girls Secondary School</h1>
+                    <p class="text-gray-500 text-sm">Information Management System</p>
+                    <div class="border-t border-gray-200 my-4"></div>
+                    <p class="text-gray-600 font-semibold">Login to continue</p>
+                </div>
+                
+                <form id="loginForm">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Username or Email</label>
+                            <input type="text" id="login-username" required 
+                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                   placeholder="Enter your username or email">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                            <input type="password" id="login-password" required 
+                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                   placeholder="Enter your password">
+                        </div>
+                    </div>
+                    
+                    <div id="login-error" class="mt-3 text-red-600 text-sm hidden"></div>
+                    
+                    <button type="submit" id="btn-login-submit"
+                            class="mt-6 w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition font-semibold flex items-center justify-center">
+                        <i class="fas fa-sign-in-alt mr-2"></i> <span>Login</span>
+                    </button>
+                </form>
+                
+                <div class="mt-6 text-center text-xs text-gray-400">
+                    <p>Demo Admin: admin@school.com | password: admin123</p>
+                    <p class="mt-1">Demo Teacher: teacher@school.com | password: teacher123</p>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+        loginForm.onsubmit = function(e) {
+            e.preventDefault();
+            loginUser();
+        };
+    }
+}
+
+function renderLoginForm() {
+    showLoginPage();
+}
+
+/**
+ * Perform Firebase Sign-In
+ */
+async function loginUser() {
+    const usernameInput = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value.trim();
+    const errorEl = document.getElementById('login-error');
+    const submitBtn = document.getElementById('btn-login-submit');
+
+    if (!usernameInput || !password) {
+        if (errorEl) {
+            errorEl.textContent = 'Please enter both username/email and password';
+            errorEl.classList.remove('hidden');
+        }
+        return;
+    }
+
+    const email = usernameInput.includes('@') ? usernameInput : `${usernameInput}@school.com`;
+
+    try {
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i> Authenticating...`;
+        }
+        if (errorEl) errorEl.classList.add('hidden');
+
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
+        const fbUser = userCredential.user;
+
+        let userDoc = null;
+        try {
+            if (typeof db !== 'undefined' && db) {
+                const docSnap = await db.collection('users').doc(fbUser.uid).get();
+                if (docSnap.exists) userDoc = docSnap.data();
+            }
+        } catch (dbErr) {
+            console.warn("Firestore user fetch error:", dbErr);
+        }
+
+        currentUser = {
+            uid: fbUser.uid,
+            email: fbUser.email,
+            username: usernameInput,
+            fullName: userDoc?.fullName || fbUser.displayName || usernameInput,
+            role: userDoc?.role || 'Admin'
+        };
+
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        window.location.reload();
+
+    } catch (error) {
+        console.error("Login error:", error);
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = `<i class="fas fa-sign-in-alt mr-2"></i> <span>Login</span>`;
+        }
+
+        let message = 'Invalid username or password';
+        if (error.code === 'auth/invalid-email') message = 'Please enter a valid email address';
+        else if (error.code === 'auth/too-many-requests') message = 'Too many failed login attempts. Try again later.';
+
+        if (errorEl) {
+            errorEl.textContent = message;
+            errorEl.classList.remove('hidden');
+        }
+    }
+}
+
+/**
+ * Logout Handlers
+ */
+async function logoutUser() {
+    if (confirm('Are you sure you want to logout?')) {
+        try {
+            if (typeof auth !== 'undefined' && auth) await auth.signOut();
+        } catch (e) {
+            console.error("Logout Error:", e);
+        }
+        currentUser = null;
+        localStorage.removeItem('currentUser');
+        window.location.reload();
+    }
+}
+
+function handleLogout() {
+    logoutUser();
+}
+
+/**
+ * Update Sidebar & Top Header Profile Info
+ */
+function updateUserProfile() {
+    if (!currentUser) return;
+
+    const nameEl = document.getElementById('user-name');
+    const roleEl = document.getElementById('user-role');
+    if (nameEl) nameEl.textContent = currentUser.fullName || currentUser.username || 'User';
+    if (roleEl) roleEl.textContent = currentUser.role || 'Member';
+
+    const headerInfoEl = document.getElementById('user-header-info');
+    if (headerInfoEl) {
+        headerInfoEl.innerHTML = `
+            <div class="flex items-center gap-3">
+                <span class="text-sm font-medium text-gray-700 hidden sm:inline-block">${currentUser.email}</span>
+                <button onclick="handleLogout()" class="text-gray-500 hover:text-red-600 transition p-1" title="Logout">
+                    <i class="fas fa-sign-out-alt text-lg"></i>
+                </button>
+            </div>
+        `;
+    }
+}
+
+/**
+ * Auth Guard Checks
+ */
+function checkAuth() {
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser) {
+        try {
+            currentUser = JSON.parse(savedUser);
+            return true;
+        } catch (e) {
+            localStorage.removeItem('currentUser');
+        }
+    }
+    if (typeof auth !== 'undefined' && auth.currentUser) return true;
+    return false;
+}
+
+function getUserRole() { return currentUser ? currentUser.role : null; }
+function isAdmin() { return getUserRole() === 'Admin'; }
+function isTeacher() { return getUserRole() === 'Teacher'; }
+function isAccountant() { return getUserRole() === 'Accountant'; }
+function hasAccess(allowedRoles) {
+    if (!currentUser) return false;
+    return allowedRoles.includes(currentUser.role);
+}
+
+function requireAuth() {
+    if (!checkAuth()) {
+        showLoginPage();
+        return false;
+    }
+    return true;
+}
+
+/**
+ * DOM Loaded & Auth Observer Entry Points
+ */
+document.addEventListener('DOMContentLoaded', () => {
+    if (checkAuth()) {
+        initApp();
+    }
 });
 
-// Export for debugging
+if (typeof auth !== 'undefined' && auth) {
+    auth.onAuthStateChanged(async (fbUser) => {
+        if (fbUser) {
+            if (!currentUser) {
+                currentUser = {
+                    uid: fbUser.uid,
+                    email: fbUser.email,
+                    username: fbUser.email.split('@')[0],
+                    role: 'Admin'
+                };
+                try {
+                    if (typeof db !== 'undefined' && db) {
+                        const docSnap = await db.collection('users').doc(fbUser.uid).get();
+                        if (docSnap.exists) {
+                            const data = docSnap.data();
+                            currentUser.role = data.role || 'Admin';
+                            currentUser.fullName = data.fullName || fbUser.displayName;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Firestore sync warning:", e);
+                }
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+            }
+            initApp();
+        } else {
+            currentUser = null;
+            localStorage.removeItem('currentUser');
+            showLoginPage();
+        }
+    });
+}
+
+// Global scope exports for console debugging and HTML handlers
+window.initApp = initApp;
+window.showLoginPage = showLoginPage;
+window.renderLoginForm = renderLoginForm;
+window.handleLogout = handleLogout;
+window.logoutUser = logoutUser;
 window.showToast = showToast;
 window.closeModal = closeModal;
 window.addNewRecord = addNewRecord;
 window.DataService = DataService;
-function renderLoginForm() {
-    showLoginPage();
-}
