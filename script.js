@@ -871,6 +871,20 @@ function sortStudentCohort(studentList) {
     });
 }
 
+// Real-time Firestore Listener
+function listenToStudentRegistry(containerId = 'main-content') {
+    if (typeof db === 'undefined' || !db) return;
+
+    db.collection('students').onSnapshot((snapshot) => {
+        const container = document.getElementById(containerId) || document.getElementById('student-registry-container');
+        if (container) {
+            renderStudentRegistry(container);
+        }
+    }, (error) => {
+        console.error("Real-time sync error:", error);
+    });
+}
+
 async function renderStudentRegistry(container) {
     if (!container) return;
     
@@ -1284,28 +1298,42 @@ async function processBulkImport() {
 // ============================================
 // 5. EXPORT REGISTER TO CSV & PRINT HARD COPY
 // ============================================
-function exportStudentsToCSV() {
-    const students = DataService.get('students', []);
-    if (students.length === 0) {
-        showToast('No student records available to export', 'warning');
+async function exportStudentsToCSV() {
+    showToast('Fetching latest student data for export...', 'info');
+    const students = await DataService.getStudents();
+
+    if (!students || students.length === 0) {
+        showToast('No student data available to export.', 'error');
         return;
     }
 
-    let csvContent = `"Student ID","Full Name","Sex","Age","Class","Admission Year","Parent Phone","Status"\n`;
+    // CSV Headers
+    const headers = ['Student ID', 'Full Name', 'Class', 'Parent Phone', 'Status', 'Entry Date', 'Exit Date', 'Exit Reason'];
+    
+    // Map rows
+    const rows = students.map(s => [
+        `"${s.id || ''}"`,
+        `"${s.name || ''}"`,
+        `"${s.class || ''}"`,
+        `"${s.parentPhone || ''}"`,
+        `"${s.status || 'Active'}"`,
+        `"${s.entryDate || ''}"`,
+        `"${s.exitDate || ''}"`,
+        `"${s.exitReason || ''}"`
+    ]);
 
-    students.forEach(s => {
-        csvContent += `"${s.id}","${s.name}","${s.sex || s.gender || 'N/A'}","${s.age || ''}","${s.class}","${s.admissionYear}","${s.parentPhone || 'N/A'}","${s.status || 'Active'}"\n`;
-    });
+    const csvContent = "data:text/csv;charset=utf-8," 
+        + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', `Student_Registry_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Student_Registry_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
-    showToast('Student register exported to CSV', 'success');
+
+    showToast('Student registry exported successfully!', 'success');
 }
 
 function printStudentRegister() {
@@ -1441,70 +1469,63 @@ async function handleSaveStudent(event) {
         showToast('Failed to save student to cloud database.', 'error');
     }
 }
-/**
- * Opens edit modal for an existing student.
- */
-function openEditStudentModal(studentId) {
-    const students = DataService.get('students') || [];
+
+// Open Edit Student Modal with Cloud Data
+async function openEditStudentModal(studentId) {
+    const students = await DataService.getStudents();
     const student = students.find(s => s.id === studentId);
+
     if (!student) {
         showToast('Student not found!', 'error');
         return;
     }
 
-    currentEditingId = studentId;
-
-    const modal = document.getElementById('modal');
     const modalContent = document.getElementById('modal-content');
-    if (!modal || !modalContent) return;
-
-    modal.classList.remove('hidden');
-    modal.style.display = 'flex';
+    if (!modalContent) return;
 
     modalContent.innerHTML = `
-        <div class="flex justify-between items-center mb-6">
-            <h3 class="text-xl font-semibold">Edit Student Details</h3>
-            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold text-gray-800">Edit Student</h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times"></i>
+            </button>
         </div>
-        <form id="studentForm">
-            <div class="grid grid-cols-2 gap-4">
-                <div class="col-span-2">
+        <form onsubmit="handleSaveStudent(event)">
+            <input type="hidden" id="student-id" value="${escapeHtml(student.id)}">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Student ID</label>
+                    <input type="text" value="${escapeHtml(student.id)}" class="w-full px-3 py-2 border rounded-lg bg-gray-100" disabled>
+                </div>
+                <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
-                    <input type="text" id="sname" value="${escapeHtml(student.name)}" required class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
+                    <input type="text" id="student-name" value="${escapeHtml(student.name)}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" required>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Class *</label>
-                    <input type="text" id="sclass" value="${escapeHtml(student.class)}" required class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
+                    <input type="text" id="student-class" value="${escapeHtml(student.class)}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" required>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Sex *</label>
-                    <select id="ssex" required class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                        <option value="Female" ${student.sex === 'Female' ? 'selected' : ''}>Female</option>
-                        <option value="Male" ${student.sex === 'Male' ? 'selected' : ''}>Male</option>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Parent Phone</label>
+                    <input type="text" id="student-phone" value="${escapeHtml(student.parentPhone || '')}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <select id="student-status" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+                        <option value="Active" ${student.status === 'Active' ? 'selected' : ''}>Active</option>
+                        <option value="Transfer" ${student.status === 'Transfer' ? 'selected' : ''}>Transfer</option>
+                        <option value="Left" ${student.status === 'Left' ? 'selected' : ''}>Left</option>
                     </select>
                 </div>
-                <div class="col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Age *</label>
-                    <input type="number" id="sage" value="${student.age || ''}" required min="10" max="25" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
-                <div class="col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Parent/Guardian Phone *</label>
-                    <input type="tel" id="sparent-phone" value="${escapeHtml(student.parentPhone || '')}" required class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
-                <div class="col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Admission Year</label>
-                    <input type="number" id="sadmission-year" value="${student.admissionYear || new Date().getFullYear()}" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
             </div>
-            
-            <div class="mt-8 flex gap-3">
-                <button type="button" onclick="closeModal()" class="flex-1 py-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-                <button type="submit" class="flex-1 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Update Student</button>
+            <div class="mt-6 flex justify-end gap-3">
+                <button type="button" onclick="closeModal()" class="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Save Changes</button>
             </div>
         </form>
     `;
 
-    document.getElementById('studentForm').onsubmit = saveStudent;
+    document.getElementById('modal').classList.remove('hidden');
 }
 
 /**
@@ -1532,60 +1553,42 @@ function deleteStudent(studentId) {
     }
 }
 
-
-/**
- * Opens quick phone number update modal.
- */
-function openPhoneUpdateModal(studentId) {
-    const students = DataService.get('students') || [];
+// Open Phone Update Modal with Cloud Data
+async function openPhoneUpdateModal(studentId) {
+    const students = await DataService.getStudents();
     const student = students.find(s => s.id === studentId);
+
     if (!student) {
         showToast('Student not found!', 'error');
         return;
     }
 
-    const modal = document.getElementById('modal');
     const modalContent = document.getElementById('modal-content');
-    if (!modal || !modalContent) return;
-
-    modal.classList.remove('hidden');
-    modal.style.display = 'flex';
+    if (!modalContent) return;
 
     modalContent.innerHTML = `
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-xl font-semibold">Update Parent Phone</h3>
-            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            <h3 class="text-lg font-bold text-gray-800">Update Parent Phone</h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times"></i>
+            </button>
         </div>
-        <div class="bg-gray-50 p-3 rounded-lg mb-4 text-sm">
-            <p><span class="font-semibold">Student:</span> ${escapeHtml(student.name)}</p>
-            <p><span class="font-semibold">Class:</span> ${escapeHtml(student.class)}</p>
-            <p><span class="font-semibold">Current Phone:</span> ${escapeHtml(student.parentPhone || 'Not set')}</p>
-        </div>
-        <form id="phoneUpdateForm">
-            <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-1">New Parent Phone Number *</label>
-                <input type="tel" id="new-phone" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-indigo-500" value="${escapeHtml(student.parentPhone || '')}" placeholder="+265 888 123 456">
+        <form onsubmit="handleUpdatePhone(event, '${escapeHtml(student.id)}')">
+            <div class="space-y-4">
+                <p class="text-sm text-gray-600">Updating phone for <strong>${escapeHtml(student.name)}</strong> (${escapeHtml(student.id)})</p>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Parent Phone Number</label>
+                    <input type="text" id="update-parent-phone" value="${escapeHtml(student.parentPhone || '')}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="+265..." required>
+                </div>
             </div>
-            <div class="flex gap-3">
-                <button type="button" onclick="closeModal()" class="flex-1 py-2.5 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-                <button type="submit" class="flex-1 py-2.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700">Update Phone</button>
+            <div class="mt-6 flex justify-end gap-3">
+                <button type="button" onclick="closeModal()" class="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700">Update Phone</button>
             </div>
         </form>
     `;
 
-    document.getElementById('phoneUpdateForm').onsubmit = function(e) {
-        e.preventDefault();
-        const newPhone = document.getElementById('new-phone').value.trim();
-        if (!newPhone) {
-            showToast('Please enter a valid phone number', 'error');
-            return;
-        }
-        student.parentPhone = newPhone;
-        DataService.set('students', students);
-        closeModal();
-        showToast('Parent phone updated successfully!', 'success');
-        if (typeof Router !== 'undefined' && Router.refresh) Router.refresh();
-    };
+    document.getElementById('modal').classList.remove('hidden');
 }
 
 // ============================================================================
