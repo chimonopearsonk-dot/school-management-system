@@ -7850,7 +7850,7 @@ function showStudentAttendanceSelector() {
 }
 
 // ============================================
-// AUTHENTICATION SYSTEM
+// AUTHENTICATION SYSTEM (Firebase Auth + Firestore)
 // ============================================
 
 // Current logged-in user
@@ -7858,7 +7858,7 @@ let currentUser = null;
 
 function showLoginPage() {
     // Save current page before login
-    const currentPage = Router.current;
+    const currentPage = (typeof Router !== 'undefined' && Router.current) ? Router.current : 'dashboard';
     
     document.body.innerHTML = `
         <div class="min-h-screen bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center p-4">
@@ -7873,10 +7873,10 @@ function showLoginPage() {
                 <form id="loginForm">
                     <div class="space-y-4">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Username or Email</label>
                             <input type="text" id="login-username" required 
                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                   placeholder="Enter your username">
+                                   placeholder="Enter your username or email">
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
@@ -7888,84 +7888,173 @@ function showLoginPage() {
                     
                     <div id="login-error" class="mt-3 text-red-600 text-sm hidden"></div>
                     
-                    <button type="submit" 
-                            class="mt-6 w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition font-semibold">
-                        <i class="fas fa-sign-in-alt mr-2"></i> Login
+                    <button type="submit" id="btn-login-submit"
+                            class="mt-6 w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition font-semibold flex items-center justify-center">
+                        <i class="fas fa-sign-in-alt mr-2"></i> <span>Login</span>
                     </button>
                 </form>
                 
                 <div class="mt-6 text-center text-xs text-gray-400">
-                    <p>Default Admin: username: admin | password: admin123</p>
-                    <p class="mt-1">Default Teacher: username: teacher | password: teacher123</p>
+                    <p>Default Admin: username: admin@school.com | password: admin123</p>
+                    <p class="mt-1">Default Teacher: username: teacher@school.com | password: teacher123</p>
                 </div>
             </div>
         </div>
     `;
     
     // Handle login form submission
-    document.getElementById('loginForm').onsubmit = function(e) {
-        e.preventDefault();
-        loginUser();
-    };
+    const loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+        loginForm.onsubmit = function(e) {
+            e.preventDefault();
+            loginUser();
+        };
+    }
 }
 
-function loginUser() {
-    const username = document.getElementById('login-username').value.trim();
+async function loginUser() {
+    const usernameInput = document.getElementById('login-username').value.trim();
     const password = document.getElementById('login-password').value.trim();
     const errorEl = document.getElementById('login-error');
-    
-    if (!username || !password) {
-        errorEl.textContent = 'Please enter both username and password';
-        errorEl.classList.remove('hidden');
+    const submitBtn = document.getElementById('btn-login-submit');
+
+    if (!usernameInput || !password) {
+        if (errorEl) {
+            errorEl.textContent = 'Please enter both username/email and password';
+            errorEl.classList.remove('hidden');
+        }
         return;
     }
-    
-    const users = DataService.get('users') || [];
-    const user = users.find(u => u.username === username && u.password === password);
-    
-    if (!user) {
-        errorEl.textContent = 'Invalid username or password';
-        errorEl.classList.remove('hidden');
-        return;
+
+    // Standardize input: if user typed 'admin', turn into 'admin@school.com' for Firebase
+    const email = usernameInput.includes('@') ? usernameInput : `${usernameInput}@school.com`;
+
+    try {
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i> Authenticating...`;
+        }
+        if (errorEl) errorEl.classList.add('hidden');
+
+        // Async Firebase Authentication
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
+        const fbUser = userCredential.user;
+
+        // Fetch user metadata & role from Firestore
+        let userDoc = null;
+        try {
+            if (typeof db !== 'undefined' && db) {
+                const docSnap = await db.collection('users').doc(fbUser.uid).get();
+                if (docSnap.exists) {
+                    userDoc = docSnap.data();
+                }
+            }
+        } catch (dbErr) {
+            console.warn("Could not load user profile from Firestore:", dbErr);
+        }
+
+        // Set global currentUser
+        currentUser = {
+            uid: fbUser.uid,
+            email: fbUser.email,
+            username: usernameInput,
+            fullName: userDoc?.fullName || fbUser.displayName || usernameInput,
+            role: userDoc?.role || 'Admin'
+        };
+
+        // Persist session locally
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+
+        if (typeof updateUserProfile === 'function') {
+            updateUserProfile();
+        }
+
+        if (typeof showToast === 'function') {
+            showToast(`Welcome back, ${currentUser.fullName}!`, 'success');
+        }
+
+        // Reload the application to render authenticated layout
+        location.reload();
+
+    } catch (error) {
+        console.error("Login Error:", error);
+
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = `<i class="fas fa-sign-in-alt mr-2"></i> <span>Login</span>`;
+        }
+
+        let message = 'Invalid username or password';
+        if (error.code === 'auth/invalid-email') {
+            message = 'Please enter a valid email address';
+        } else if (error.code === 'auth/too-many-requests') {
+            message = 'Too many failed login attempts. Try again later.';
+        }
+
+        if (errorEl) {
+            errorEl.textContent = message;
+            errorEl.classList.remove('hidden');
+        }
     }
-    
-    // Login successful
-    currentUser = user;
-    localStorage.setItem('currentUser', JSON.stringify(user));
-    updateUserProfile();
-    errorEl.classList.add('hidden');
-    
-    showToast(`Welcome back, ${user.fullName || user.username}!`, 'success');
-    
-    // Reload the application
-    location.reload();
 }
 
-function loadUsers() {
-    const users = DataService.get('users') || [];
+async function loadUsers() {
     const tbody = document.getElementById('usersTableBody');
     if (!tbody) return;
-    
-    tbody.innerHTML = "";
-    users.forEach((user, index) => {
-        tbody.innerHTML += `
-            <tr>
-                <td>${index + 1}</td>
-                <td>${escapeHtml(user.username)}</td>
-                <td>${escapeHtml(user.fullName || user.name || '')}</td>
-                <td>${escapeHtml(user.role || '')}</td>
-                <td>
-                    <button onclick="deleteUser(${index})" class="text-red-600 hover:text-red-800">
-                        Delete
-                    </button>
-                </td>
-            </tr>
-        `;
-    });
+
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i> Loading users...</td></tr>`;
+
+    try {
+        let users = [];
+        if (typeof db !== 'undefined' && db) {
+            const snapshot = await db.collection('users').get();
+            users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+
+        if (users.length === 0 && typeof DataService !== 'undefined') {
+            users = DataService.get('users') || [];
+        }
+
+        tbody.innerHTML = "";
+        if (users.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-500">No users found</td></tr>`;
+            return;
+        }
+
+        users.forEach((user, index) => {
+            const safeUsername = typeof escapeHtml === 'function' ? escapeHtml(user.username || user.email || '') : (user.username || user.email || '');
+            const safeFullName = typeof escapeHtml === 'function' ? escapeHtml(user.fullName || user.name || '') : (user.fullName || user.name || '');
+            const safeRole = typeof escapeHtml === 'function' ? escapeHtml(user.role || 'Teacher') : (user.role || 'Teacher');
+
+            tbody.innerHTML += `
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="py-3 px-4">${index + 1}</td>
+                    <td class="py-3 px-4 font-medium text-gray-800">${safeUsername}</td>
+                    <td class="py-3 px-4">${safeFullName}</td>
+                    <td class="py-3 px-4"><span class="px-2 py-1 text-xs rounded-full bg-indigo-50 text-indigo-700 font-semibold">${safeRole}</span></td>
+                    <td class="py-3 px-4">
+                        <button onclick="deleteUser('${user.id || index}')" class="text-red-600 hover:text-red-800 text-sm font-medium">
+                            <i class="fas fa-trash mr-1"></i> Delete
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+    } catch (error) {
+        console.error("Error loading users:", error);
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-500">Error loading users</td></tr>`;
+    }
 }
 
-function logoutUser() {
+async function logoutUser() {
     if (confirm('Are you sure you want to logout?')) {
+        try {
+            if (typeof auth !== 'undefined' && auth) {
+                await auth.signOut();
+            }
+        } catch (e) {
+            console.error("Firebase SignOut error:", e);
+        }
         currentUser = null;
         localStorage.removeItem('currentUser');
         location.reload();
@@ -7973,7 +8062,7 @@ function logoutUser() {
 }
 
 function checkAuth() {
-    // Check if user is already logged in
+    // Check local session
     const savedUser = localStorage.getItem('currentUser');
     if (savedUser) {
         try {
@@ -7981,9 +8070,14 @@ function checkAuth() {
             return true;
         } catch (e) {
             localStorage.removeItem('currentUser');
-            return false;
         }
     }
+
+    // Fallback to Firebase current user
+    if (typeof auth !== 'undefined' && auth.currentUser) {
+        return true;
+    }
+
     return false;
 }
 
@@ -9506,35 +9600,33 @@ function setupSidebar() {
 // ============================================
 // INITIALIZATION
 // ============================================
+// Global Session Listener & Route Protection
 document.addEventListener('DOMContentLoaded', () => {
-    // Check authentication first
-    if (!requireAuth()) {
-        return;
-    }
-    updateUserProfile();
+    const mainContainer = document.getElementById('main-content') || document.getElementById('app');
 
-    setupNavigation();
-    setupSidebar();
-    
-    seedData();                    
-    
-    const addBtn = document.getElementById('add-new-btn');
-    if (addBtn) {
-        const newBtn = addBtn.cloneNode(true);
-        addBtn.parentNode.replaceChild(newBtn, addBtn);
-        newBtn.addEventListener('click', addNewRecord);
-    }
-    
-    // Close modal when clicking outside
-    const modal = document.getElementById('modal');
-    if (modal) {
-        modal.addEventListener('click', function(e) {
-            if (e.target === this) closeModal();
-        });
-    }
-    
-    // Start fresh on Dashboard
-    Router.navigate('dashboard');
+    auth.onAuthStateChanged((user) => {
+        const userHeaderInfo = document.getElementById('user-header-info');
+        
+        if (user) {
+            // User is signed in: show app header elements & registry
+            if (userHeaderInfo) {
+                userHeaderInfo.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm font-medium text-gray-700"><i class="fas fa-user-circle mr-1 text-indigo-600"></i> ${escapeHtml(user.email)}</span>
+                        <button onclick="handleLogout()" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 border border-gray-300" title="Sign Out">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </button>
+                    </div>
+                `;
+            }
+            // Load dashboard
+            renderStudentRegistry(mainContainer);
+        } else {
+            // User is signed out: hide navbar info & display login form
+            if (userHeaderInfo) userHeaderInfo.innerHTML = '';
+            renderLoginForm(mainContainer);
+        }
+    });
 });
 
 // Export for debugging
