@@ -763,6 +763,7 @@ function refreshUIState() {
 function refreshApp() {
     refreshUIState();
     refreshCurrentPage();
+    setTimeout(hideLoadingSpinner, 50);
 }
 
 async function renderTeacherDashboard(container) {
@@ -8342,78 +8343,85 @@ function showAddUserForm() {
 }
 
 async function handleSaveUserSubmit(event) {
-    event.preventDefault();
+    if (event) event.preventDefault();
+
+    const username = document.getElementById('user-username')?.value?.trim();
+    const emailInput = document.getElementById('user-email')?.value?.trim();
+    const password = document.getElementById('user-password')?.value?.trim();
+    const role = document.getElementById('user-role')?.value || 'Teacher';
+    const fullName = document.getElementById('user-fullname')?.value?.trim() || username;
+
+    if (!username || !password) {
+        showToast('Please provide both a username and a password.', 'error');
+        return;
+    }
+
+    if (password.length < 6) {
+        showToast('Password must be at least 6 characters long.', 'error');
+        return;
+    }
+
+    const email = emailInput || `${username.toLowerCase()}@school.com`;
+    const submitBtn = event.target.querySelector('button[type="submit"]');
     
-    const submitBtn = document.getElementById('save-user-submit-btn');
     if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-1"></i> Registering...`;
+        submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i> Saving...`;
     }
 
     try {
-        const username = document.getElementById("user-username")?.value?.trim() || "";
-        const email = document.getElementById("user-email")?.value?.trim() || `${username.toLowerCase()}@school.com`;
-        const fullName = document.getElementById("user-fullName")?.value?.trim() || "";
-        const password = document.getElementById("user-password")?.value?.trim() || "";
-        const role = document.getElementById("user-role-select")?.value || "Teacher";
+        // 1. Save to Local DataService
+        const users = DataService.get('users') || [];
+        const existingIndex = users.findIndex(u => u.username?.toLowerCase() === username.toLowerCase());
 
-        let users = DataService.get("users") || [];
-        
-        // 1. Check duplicate username in local storage
-        if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
-            showToast("Username already exists in database.", "error");
-            if (submitBtn) {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = `Save User`;
-            }
-            return;
-        }
-
-        // 2. Register user in Firebase Authentication
-        let fbUid = 'local_' + Date.now();
-        try {
-            const fbUser = await createSecondaryFirebaseUser(email, password);
-            if (fbUser && fbUser.uid) {
-                fbUid = fbUser.uid;
-            }
-        } catch (fbErr) {
-            console.warn("Firebase Auth registration note:", fbErr.message);
-            if (fbErr.code === 'auth/email-already-in-use') {
-                showToast("This email is already registered in Firebase.", "error");
-                if (submitBtn) {
-                    submitBtn.disabled = false;
-                    submitBtn.innerHTML = `Save User`;
-                }
-                return;
-            }
-        }
-
-        // 3. Save complete user profile to local storage & DataService
-        const newUser = {
-            uid: fbUid,
-            username: username,
-            email: email,
-            fullName: fullName,
-            name: fullName,
-            password: password, // preserved for fallback local authentication
-            role: role,
-            status: 'Active',
+        const newUserObj = {
+            id: existingIndex >= 0 ? users[existingIndex].id : Date.now().toString(),
+            username,
+            email,
+            password,
+            role,
+            fullName,
             createdAt: new Date().toISOString()
         };
 
-        users.push(newUser);
-        DataService.set("users", users);
+        if (existingIndex >= 0) {
+            users[existingIndex] = newUserObj;
+        } else {
+            users.push(newUserObj);
+        }
 
-        showToast(`User "${username}" created successfully in Firebase Auth & Database!`, "success");
+        DataService.set('users', users);
 
-        // 4. Return to User List
-        showUserModal();
+        // 2. Secondary Firebase Auth Sync (Runs quietly in background)
+        if (window.firebaseConfig && typeof firebase !== 'undefined') {
+            try {
+                let secondaryApp = firebase.apps.find(app => app.name === 'SecondaryApp');
+                if (!secondaryApp) {
+                    secondaryApp = firebase.initializeApp(window.firebaseConfig, 'SecondaryApp');
+                }
+                await secondaryApp.auth().createUserWithEmailAndPassword(email, password);
+                await secondaryApp.auth().signOut();
+            } catch (fbErr) {
+                // Silently handle existing accounts without throwing user-facing tech errors
+                console.warn('Background account sync status:', fbErr.code);
+            }
+        }
+
+        // 3. User-Friendly Notification
+        showToast('User added successfully!', 'success');
+
+        // Close Modal & Refresh User List
+        if (typeof closeModal === 'function') closeModal('user-modal');
+        if (typeof renderUsersPage === 'function') renderUsersPage();
+        refreshCurrentPage();
+
     } catch (err) {
-        console.error("Error creating user:", err);
-        showToast(`Failed to save user: ${err.message}`, "error");
+        console.error('Save user error:', err);
+        showToast('Failed to save user. Please try again.', 'error');
+    } finally {
         if (submitBtn) {
             submitBtn.disabled = false;
-            submitBtn.innerHTML = `Save User`;
+            submitBtn.innerHTML = 'Save User';
         }
     }
 }
@@ -9782,6 +9790,27 @@ window.addEventListener('hashchange', handleInitialRoute);
 // ============================================
 // COMPLETE APP INITIALIZATION & AUTH SYSTEM
 // ============================================
+function hideLoadingSpinner() {
+    // 1. Hide full-screen loaders or modal overlays
+    const loaderElements = document.querySelectorAll(
+        '#loading, #app-loader, #auth-spinner, #loading-spinner, .spinner-overlay, .loading-screen, #login-modal'
+    );
+    loaderElements.forEach(el => {
+        el.classList.add('hidden');
+        el.style.display = 'none';
+    });
+
+    // 2. Restore any spinning login/submit buttons
+    document.querySelectorAll('button[type="submit"], #login-btn').forEach(btn => {
+        btn.disabled = false;
+        if (btn.innerHTML.includes('fa-spinner') || btn.innerHTML.includes('Authenticating')) {
+            btn.innerHTML = btn.dataset.originalText || 'Login';
+        }
+    });
+
+    // 3. Ensure body scroll is re-enabled if locked by a modal
+    document.body.classList.remove('overflow-hidden', 'modal-open');
+}
 
 let currentUser = null;
 
@@ -9789,46 +9818,23 @@ let currentUser = null;
  * Main Application Startup Function
  * Restores sidebar, navigation, seed data, and router initialization
  */
-async function initApp() {
-    if (!checkAuth()) {
-        showLoginPage();
-        return;
+function initApp() {
+    // Show main application layout if hidden
+    const mainLayout = document.getElementById('app-layout') || document.getElementById('main-content');
+    if (mainLayout) {
+        mainLayout.style.display = 'block';
+        mainLayout.classList.remove('hidden');
     }
 
-    // 1. Update user details in header & sidebar
-    updateUserProfile();
-
-    // 2. Restore sidebar & navigation handlers
-    if (typeof setupNavigation === 'function') setupNavigation();
-    if (typeof setupSidebar === 'function') setupSidebar();
-    if (typeof seedData === 'function') seedData();
-
-    // 3. Re-attach Add New Record button listener
-    const addBtn = document.getElementById('add-new-btn');
-    if (addBtn) {
-        const newBtn = addBtn.cloneNode(true);
-        if (addBtn.parentNode) {
-            addBtn.parentNode.replaceChild(newBtn, addBtn);
-        }
-        if (typeof addNewRecord === 'function') {
-            newBtn.addEventListener('click', addNewRecord);
-        }
+    // Hide login screen/form if visible
+    const loginScreen = document.getElementById('login-screen') || document.getElementById('login-modal');
+    if (loginScreen) {
+        loginScreen.style.display = 'none';
+        loginScreen.classList.add('hidden');
     }
 
-    // 4. Modal background click listener
-    const modal = document.getElementById('modal');
-    if (modal) {
-        modal.addEventListener('click', function(e) {
-            if (e.target === this && typeof closeModal === 'function') {
-                closeModal();
-            }
-        });
-    }
-
-    // 5. Navigate to Dashboard view
-    if (typeof Router !== 'undefined' && Router.navigate) {
-        Router.navigate('dashboard');
-    }
+    // Render navigation and initial view
+    refreshApp();
 }
 
 /**
@@ -10029,8 +10035,8 @@ async function loginUser(event) {
 
     } catch (err) {
         console.error("Login process error:", err);
-        showToast('Authentication failed. Please try again.', 'error');
-        resetBtn();
+        showToast('Invalid username or password.', 'error');
+        hideLoadingSpinner(); 
     }
 }
 
