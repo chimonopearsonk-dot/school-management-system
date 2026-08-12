@@ -9175,6 +9175,78 @@ function handleAdminProcessRequest(requestId, action) {
 }
 
 // ============================================
+// SIDEBAR COLLAPSE FUNCTIONALITY
+// ============================================
+
+let isSidebarCollapsed = false;
+
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const collapseIcon = document.getElementById('collapse-icon');
+    const schoolName = document.getElementById('school-name');
+    const schoolTagline = document.getElementById('school-tagline');
+    const userInfo = document.getElementById('user-info');
+    const navLabels = document.querySelectorAll('.nav-label');
+
+    isSidebarCollapsed = !isSidebarCollapsed;
+
+    if (isSidebarCollapsed) {
+        // Collapse sidebar width
+        sidebar.classList.remove('w-64');
+        sidebar.classList.add('w-20');
+
+        // Hide text elements
+        if (schoolName) schoolName.classList.add('hidden');
+        if (schoolTagline) schoolTagline.classList.add('hidden');
+        if (userInfo) userInfo.classList.add('hidden');
+        navLabels.forEach(label => label.classList.add('hidden'));
+
+        // Flip arrow icon
+        if (collapseIcon) {
+            collapseIcon.classList.remove('fa-chevron-left');
+            collapseIcon.classList.add('fa-chevron-right');
+        }
+    } else {
+        // Expand sidebar width
+        sidebar.classList.remove('w-20');
+        sidebar.classList.add('w-64');
+
+        // Show text elements
+        if (schoolName) schoolName.classList.remove('hidden');
+        if (schoolTagline) schoolTagline.classList.remove('hidden');
+        if (userInfo) userInfo.classList.remove('hidden');
+        navLabels.forEach(label => label.classList.remove('hidden'));
+
+        // Reset arrow icon
+        if (collapseIcon) {
+            collapseIcon.classList.remove('fa-chevron-right');
+            collapseIcon.classList.add('fa-chevron-left');
+        }
+    }
+}
+
+function renderSidebar() {
+    const navContainer = document.getElementById('main-nav');
+    if (!navContainer) return;
+
+    // Use your current active module list
+    navContainer.innerHTML = APP_MODULES.map(module => {
+        const isActive = module.id === activeModuleId;
+        const activeStyles = isActive 
+            ? 'bg-indigo-700 text-white font-medium shadow' 
+            : 'text-indigo-200 hover:bg-indigo-700 hover:text-white';
+
+        return `
+            <a href="#" onclick="navigateTo('${module.id}'); return false;" 
+               class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 mb-1 ${activeStyles}">
+                <i class="${module.icon} w-5 text-center text-lg"></i>
+                <span class="text-sm nav-label ${isSidebarCollapsed ? 'hidden' : ''}">${module.label}</span>
+            </a>
+        `;
+    }).join('');
+}
+
+// ============================================
 // PLACEHOLDER PAGES
 // ============================================
 
