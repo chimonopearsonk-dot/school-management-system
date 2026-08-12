@@ -8254,7 +8254,7 @@ async function handleSaveUserSubmit(event) {
 
     try {
         const username = document.getElementById("user-username")?.value?.trim() || "";
-        const email = document.getElementById("user-email")?.value?.trim() || `${username.toLowerCase()}@school.internal`;
+        const email = document.getElementById("user-email")?.value?.trim() || `${username.toLowerCase()}@school.com`;
         const fullName = document.getElementById("user-fullName")?.value?.trim() || "";
         const password = document.getElementById("user-password")?.value?.trim() || "";
         const role = document.getElementById("user-role-select")?.value || "Teacher";
@@ -9791,71 +9791,98 @@ function showLoginPage() {
 function renderLoginForm() {
     showLoginPage();
 }
+async function loginUser(event) {
+    if (event) event.preventDefault();
 
-/**
- * Perform Firebase Sign-In
- */
-async function loginUser() {
-    const usernameInput = document.getElementById('login-username').value.trim();
-    const password = document.getElementById('login-password').value.trim();
-    const errorEl = document.getElementById('login-error');
-    const submitBtn = document.getElementById('btn-login-submit');
+    const identifierInput = document.getElementById('login-username')?.value?.trim() || 
+                            document.getElementById('email')?.value?.trim() || '';
+    const passwordInput = document.getElementById('login-password')?.value?.trim() || 
+                          document.getElementById('password')?.value?.trim() || '';
 
-    if (!usernameInput || !password) {
-        if (errorEl) {
-            errorEl.textContent = 'Please enter both username/email and password';
-            errorEl.classList.remove('hidden');
-        }
+    if (!identifierInput || !passwordInput) {
+        showToast('Please enter both username/email and password.', 'error');
         return;
     }
 
-    const email = usernameInput.includes('@') ? usernameInput : `${usernameInput}@school.com`;
+    // 1. Resolve Username to Email from DataService
+    const users = DataService.get('users') || [];
+    const matchedUser = users.find(u => 
+        (u.username && u.username.toLowerCase() === identifierInput.toLowerCase()) || 
+        (u.email && u.email.toLowerCase() === identifierInput.toLowerCase())
+    );
 
+    // Determine the actual email address to pass to Firebase
+    let targetEmail = identifierInput;
+    if (matchedUser && matchedUser.email) {
+        targetEmail = matchedUser.email;
+    } else if (!identifierInput.includes('@')) {
+        // Fallback standard domain if no email found
+        targetEmail = `${identifierInput.toLowerCase()}@school.com`;
+    }
+
+    // 2. Authenticate with Firebase Auth
     try {
-        if (submitBtn) {
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i> Authenticating...`;
+        let userCredential = null;
+
+        if (window.firebaseAuth && window.signInWithEmailAndPassword) {
+            userCredential = await window.signInWithEmailAndPassword(window.firebaseAuth, targetEmail, passwordInput);
+        } else if (typeof firebase !== 'undefined' && firebase.auth) {
+            userCredential = await firebase.auth().signInWithEmailAndPassword(targetEmail, passwordInput);
         }
-        if (errorEl) errorEl.classList.add('hidden');
 
-        const userCredential = await auth.signInWithEmailAndPassword(email, password);
-        const fbUser = userCredential.user;
-
-        let userDoc = null;
-        try {
-            if (typeof db !== 'undefined' && db) {
-                const docSnap = await db.collection('users').doc(fbUser.uid).get();
-                if (docSnap.exists) userDoc = docSnap.data();
+        if (userCredential) {
+            showToast('Login successful!', 'success');
+            
+            // Set current session user
+            const sessionUser = matchedUser || {
+                uid: userCredential.user.uid,
+                email: userCredential.user.email,
+                role: 'Teacher'
+            };
+            
+            if (typeof setCurrentUser === 'function') {
+                setCurrentUser(sessionUser);
+            } else {
+                localStorage.setItem('currentUser', JSON.stringify(sessionUser));
             }
-        } catch (dbErr) {
-            console.warn("Firestore user fetch error:", dbErr);
+            
+            // Route to dashboard
+            if (typeof navigateTo === 'function') {
+                navigateTo(sessionUser.role === 'Admin' ? 'dashboard' : 'teacher-dashboard');
+            } else {
+                window.location.reload();
+            }
+            return;
+        }
+    } catch (fbErr) {
+        console.error('Firebase Login failed:', fbErr);
+
+        // 3. Fallback: Local Database Check if Firebase fails or user exists only locally
+        if (matchedUser && matchedUser.password === passwordInput) {
+            console.warn('Firebase login failed; logging in via Local DB backup.');
+            showToast('Logged in via local database offline mode.', 'info');
+            
+            if (typeof setCurrentUser === 'function') {
+                setCurrentUser(matchedUser);
+            } else {
+                localStorage.setItem('currentUser', JSON.stringify(matchedUser));
+            }
+
+            if (typeof navigateTo === 'function') {
+                navigateTo(matchedUser.role === 'Admin' ? 'dashboard' : 'teacher-dashboard');
+            } else {
+                window.location.reload();
+            }
+            return;
         }
 
-        currentUser = {
-            uid: fbUser.uid,
-            email: fbUser.email,
-            username: usernameInput,
-            fullName: userDoc?.fullName || fbUser.displayName || usernameInput,
-            role: userDoc?.role || 'Admin'
-        };
-
-        localStorage.setItem('currentUser', JSON.stringify(currentUser));
-        window.location.reload();
-
-    } catch (error) {
-        console.error("Login error:", error);
-        if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = `<i class="fas fa-sign-in-alt mr-2"></i> <span>Login</span>`;
-        }
-
-        let message = 'Invalid username or password';
-        if (error.code === 'auth/invalid-email') message = 'Please enter a valid email address';
-        else if (error.code === 'auth/too-many-requests') message = 'Too many failed login attempts. Try again later.';
-
-        if (errorEl) {
-            errorEl.textContent = message;
-            errorEl.classList.remove('hidden');
+        // Display user-friendly error
+        if (fbErr.code === 'auth/invalid-credential' || fbErr.code === 'auth/user-not-found' || fbErr.code === 'auth/wrong-password') {
+            showToast('Invalid email/username or password.', 'error');
+        } else if (fbErr.code === 'auth/invalid-email') {
+            showToast('Invalid email address format.', 'error');
+        } else {
+            showToast(`Login failed: ${fbErr.message}`, 'error');
         }
     }
 }
