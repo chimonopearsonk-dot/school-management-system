@@ -364,7 +364,6 @@ function standardizeClassName(className) {
     standardized = standardized.replace(/\s+/g, ' ');
     return standardized;
 }
-
 // ============================================
 // ROUTER
 // ============================================
@@ -404,35 +403,33 @@ const Router = {
     },
     
     updateUI() {
-    // Update page title
-    const titleEl = document.getElementById('page-title');
-    if (titleEl) {
-        const page = this.pages[this.current];
-        titleEl.textContent = page ? page.title : 'Dashboard';
-    }
-    
-    // Update active nav links
-    document.querySelectorAll('.nav-link').forEach(link => {
-        link.classList.toggle('active', link.dataset.page === this.current);
-    });
-    
-    // Update "Add New" button text & visibility
-    const btnText = document.getElementById('add-btn-text');
-    if (btnText) {
-        // Target the parent <button> element wrapping the text
-        const actionBtn = btnText.closest('button') || btnText.parentElement;
-        
-        if (this.current === 'dashboard') {
-            // Hide the button completely on the Dashboard
-            actionBtn.style.display = 'none';
-        } else {
-            // Show the button and dynamically set the label on other pages
-            actionBtn.style.display = 'inline-flex';
-            const pageName = this.current.charAt(0).toUpperCase() + this.current.slice(1);
-            btnText.textContent = `Add ${pageName.slice(0, -1)}`;
+        // Update page title
+        const titleEl = document.getElementById('page-title');
+        if (titleEl) {
+            const page = this.pages[this.current];
+            titleEl.textContent = page ? page.title : 'Dashboard';
         }
-    }
-}
+        
+        // Update active nav links
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.classList.toggle('active', link.dataset.page === this.current);
+        });
+        
+        // Update "Add New" button text and toggle visibility for dashboard
+        const btnText = document.getElementById('add-btn-text');
+        if (btnText) {
+            const actionBtn = btnText.closest('button') || btnText.parentElement;
+            
+            if (this.current === 'dashboard' || this.current === 'teacher-dashboard') {
+                if (actionBtn) actionBtn.style.display = 'none';
+            } else {
+                if (actionBtn) actionBtn.style.display = 'inline-flex';
+                const pageName = this.current.charAt(0).toUpperCase() + this.current.slice(1);
+                btnText.textContent = `Add ${pageName.slice(0, -1)}`;
+            }
+        }
+    },
+    
     refresh() {
         const container = document.getElementById('content');
         if (container && this.current) {
@@ -447,6 +444,7 @@ const Router = {
         showToast(message, type);
     }
 };
+
 // ============================================
 // NAVIGATION SETUP
 // ============================================
@@ -458,7 +456,6 @@ function setupNavigation() {
         { id: 'classes', icon: 'fa-chalkboard', label: 'Classes' },
         { id: 'attendance', icon: 'fa-calendar-check', label: 'Attendance' },
         { id: 'grades', icon: 'fa-graduation-cap', label: 'Grades' },
-
     ];
 
     // Add User Management for Admin only
@@ -467,7 +464,6 @@ function setupNavigation() {
         navConfig.push({ id: 'portal', icon: 'fa-door-open', label: 'Results Portal' });
         navConfig.push({ id: 'settings', icon: 'fa-cog', label: 'School Settings' }); 
         navConfig.push({ id: 'requests', icon: 'fa-clipboard-list', label: 'Phone Requests' });
-
     }
     
     const nav = document.getElementById('main-nav');
@@ -489,7 +485,7 @@ function setupNavigation() {
         </ul>
     `;
     
-    // Event delegation for navigation - single handler
+    // Event delegation for navigation
     nav.addEventListener('click', function(e) {
         const link = e.target.closest('[data-page]');
         if (link) {
@@ -498,9 +494,6 @@ function setupNavigation() {
             Router.navigate(page);
         }
     });
-
-
-
 }
 
 // ============================================
