@@ -404,26 +404,35 @@ const Router = {
     },
     
     updateUI() {
-        // Update page title
-        const titleEl = document.getElementById('page-title');
-        if (titleEl) {
-            const page = this.pages[this.current];
-            titleEl.textContent = page ? page.title : 'Dashboard';
-        }
+    // Update page title
+    const titleEl = document.getElementById('page-title');
+    if (titleEl) {
+        const page = this.pages[this.current];
+        titleEl.textContent = page ? page.title : 'Dashboard';
+    }
+    
+    // Update active nav links
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.toggle('active', link.dataset.page === this.current);
+    });
+    
+    // Update "Add New" button text & visibility
+    const btnText = document.getElementById('add-btn-text');
+    if (btnText) {
+        // Target the parent <button> element wrapping the text
+        const actionBtn = btnText.closest('button') || btnText.parentElement;
         
-        // Update active nav links
-        document.querySelectorAll('.nav-link').forEach(link => {
-            link.classList.toggle('active', link.dataset.page === this.current);
-        });
-        
-        // Update "Add New" button text
-        const btnText = document.getElementById('add-btn-text');
-        if (btnText) {
+        if (this.current === 'dashboard') {
+            // Hide the button completely on the Dashboard
+            actionBtn.style.display = 'none';
+        } else {
+            // Show the button and dynamically set the label on other pages
+            actionBtn.style.display = 'inline-flex';
             const pageName = this.current.charAt(0).toUpperCase() + this.current.slice(1);
             btnText.textContent = `Add ${pageName.slice(0, -1)}`;
         }
-    },
-    
+    }
+}
     refresh() {
         const container = document.getElementById('content');
         if (container && this.current) {
