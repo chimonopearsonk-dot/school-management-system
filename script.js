@@ -9791,99 +9791,148 @@ function showLoginPage() {
 function renderLoginForm() {
     showLoginPage();
 }
+
 async function loginUser(event) {
     if (event) event.preventDefault();
 
-    const identifierInput = document.getElementById('login-username')?.value?.trim() || 
-                            document.getElementById('email')?.value?.trim() || '';
-    const passwordInput = document.getElementById('login-password')?.value?.trim() || 
-                          document.getElementById('password')?.value?.trim() || '';
+    // 1. Get Login Button & Show Spinner
+    const loginForm = document.getElementById('loginForm') || document.forms['loginForm'];
+    const loginBtn = document.getElementById('login-btn') || 
+                     (loginForm ? loginForm.querySelector('button[type="submit"]') : null) || 
+                     document.querySelector('button[type="submit"]');
+                     
+    const originalBtnHtml = loginBtn ? loginBtn.innerHTML : 'Login';
 
-    if (!identifierInput || !passwordInput) {
-        showToast('Please enter both username/email and password.', 'error');
-        return;
+    if (loginBtn) {
+        loginBtn.disabled = true;
+        loginBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i> Authenticating...`;
     }
 
-    // 1. Resolve Username to Email from DataService
-    const users = DataService.get('users') || [];
-    const matchedUser = users.find(u => 
-        (u.username && u.username.toLowerCase() === identifierInput.toLowerCase()) || 
-        (u.email && u.email.toLowerCase() === identifierInput.toLowerCase())
-    );
+    const resetBtn = () => {
+        if (loginBtn) {
+            loginBtn.disabled = false;
+            loginBtn.innerHTML = originalBtnHtml;
+        }
+    };
 
-    // Determine the actual email address to pass to Firebase
-    let targetEmail = identifierInput;
-    if (matchedUser && matchedUser.email) {
-        targetEmail = matchedUser.email;
-    } else if (!identifierInput.includes('@')) {
-        // Fallback standard domain if no email found
-        targetEmail = `${identifierInput.toLowerCase()}@school.com`;
-    }
-
-    // 2. Authenticate with Firebase Auth
     try {
-        let userCredential = null;
+        const identifierInput = (
+            document.getElementById('login-username')?.value || 
+            document.getElementById('email')?.value || ''
+        ).trim();
 
-        if (window.firebaseAuth && window.signInWithEmailAndPassword) {
-            userCredential = await window.signInWithEmailAndPassword(window.firebaseAuth, targetEmail, passwordInput);
-        } else if (typeof firebase !== 'undefined' && firebase.auth) {
-            userCredential = await firebase.auth().signInWithEmailAndPassword(targetEmail, passwordInput);
-        }
+        const passwordInput = (
+            document.getElementById('login-password')?.value || 
+            document.getElementById('password')?.value || ''
+        ).trim();
 
-        if (userCredential) {
-            showToast('Login successful!', 'success');
-            
-            // Set current session user
-            const sessionUser = matchedUser || {
-                uid: userCredential.user.uid,
-                email: userCredential.user.email,
-                role: 'Teacher'
-            };
-            
-            if (typeof setCurrentUser === 'function') {
-                setCurrentUser(sessionUser);
-            } else {
-                localStorage.setItem('currentUser', JSON.stringify(sessionUser));
-            }
-            
-            // Route to dashboard
-            if (typeof navigateTo === 'function') {
-                navigateTo(sessionUser.role === 'Admin' ? 'dashboard' : 'teacher-dashboard');
-            } else {
-                window.location.reload();
-            }
-            return;
-        }
-    } catch (fbErr) {
-        console.error('Firebase Login failed:', fbErr);
-
-        // 3. Fallback: Local Database Check if Firebase fails or user exists only locally
-        if (matchedUser && matchedUser.password === passwordInput) {
-            console.warn('Firebase login failed; logging in via Local DB backup.');
-            showToast('Logged in via local database offline mode.', 'info');
-            
-            if (typeof setCurrentUser === 'function') {
-                setCurrentUser(matchedUser);
-            } else {
-                localStorage.setItem('currentUser', JSON.stringify(matchedUser));
-            }
-
-            if (typeof navigateTo === 'function') {
-                navigateTo(matchedUser.role === 'Admin' ? 'dashboard' : 'teacher-dashboard');
-            } else {
-                window.location.reload();
-            }
+        if (!identifierInput || !passwordInput) {
+            showToast('Please enter both username/email and password.', 'error');
+            resetBtn();
             return;
         }
 
-        // Display user-friendly error
-        if (fbErr.code === 'auth/invalid-credential' || fbErr.code === 'auth/user-not-found' || fbErr.code === 'auth/wrong-password') {
-            showToast('Invalid email/username or password.', 'error');
-        } else if (fbErr.code === 'auth/invalid-email') {
-            showToast('Invalid email address format.', 'error');
-        } else {
-            showToast(`Login failed: ${fbErr.message}`, 'error');
+        // 2. Resolve User Profile from Local Database
+        const users = DataService.get('users') || [];
+        const matchedUser = users.find(u => 
+            (u.username && u.username.toLowerCase() === identifierInput.toLowerCase()) || 
+            (u.email && u.email.toLowerCase() === identifierInput.toLowerCase())
+        );
+
+        let targetEmail = identifierInput;
+        if (matchedUser && matchedUser.email) {
+            targetEmail = matchedUser.email;
+        } else if (!identifierInput.includes('@')) {
+            targetEmail = `${identifierInput.toLowerCase()}@school.com`;
         }
+
+        let authenticatedUser = null;
+
+        // 3. Attempt Firebase Authentication
+        try {
+            let userCredential = null;
+            if (window.firebaseAuth && window.signInWithEmailAndPassword) {
+                userCredential = await window.signInWithEmailAndPassword(window.firebaseAuth, targetEmail, passwordInput);
+            } else if (typeof firebase !== 'undefined' && firebase.auth) {
+                userCredential = await firebase.auth().signInWithEmailAndPassword(targetEmail, passwordInput);
+            }
+
+            if (userCredential) {
+                authenticatedUser = matchedUser || {
+                    uid: userCredential.user.uid,
+                    username: identifierInput,
+                    email: userCredential.user.email,
+                    role: 'Teacher'
+                };
+            }
+        } catch (fbErr) {
+            console.warn("Firebase authentication bypassed; falling back to local verification.");
+        }
+
+        // 4. Local Database Verification Fallback
+        if (!authenticatedUser && matchedUser && matchedUser.password === passwordInput) {
+            authenticatedUser = matchedUser;
+        }
+
+        // 5. Handle Successful Authentication
+        if (authenticatedUser) {
+            // Set global user session in memory & localStorage
+            window.currentUser = authenticatedUser;
+            if (typeof setCurrentUser === 'function') {
+                setCurrentUser(authenticatedUser);
+            } else {
+                localStorage.setItem('currentUser', JSON.stringify(authenticatedUser));
+            }
+
+            // Update user profile display in UI header if present
+            if (typeof updateUserProfile === 'function') {
+                updateUserProfile();
+            }
+
+            showToast('Logged in successfully!', 'success');
+
+            // Hide login modal / overlay if applicable
+            const loginModal = document.getElementById('login-modal') || document.getElementById('login-screen');
+            if (loginModal) {
+                loginModal.classList.add('hidden');
+                loginModal.style.display = 'none';
+            }
+
+            // Determine route based on user role
+            let targetPage = 'dashboard';
+            if (typeof getDashboardForRole === 'function') {
+                targetPage = getDashboardForRole();
+            } else if (authenticatedUser.role === 'Teacher') {
+                targetPage = 'teacher-dashboard';
+            } else if (authenticatedUser.role === 'Accountant') {
+                targetPage = 'accountant-dashboard';
+            }
+
+            // Perform smooth navigation without freezing or requiring page reload
+            setTimeout(() => {
+                if (typeof Router !== 'undefined' && Router.navigate) {
+                    Router.navigate(targetPage);
+                } else if (typeof navigateTo === 'function') {
+                    navigateTo(targetPage);
+                } else if (typeof handleInitialRoute === 'function') {
+                    window.location.hash = targetPage;
+                    handleInitialRoute();
+                } else {
+                    window.location.reload();
+                }
+            }, 300);
+
+            return;
+        } 
+
+        // 6. Handle Invalid Credentials
+        showToast('Invalid username/email or password.', 'error');
+        resetBtn();
+
+    } catch (err) {
+        console.error("Login process error:", err);
+        showToast('Authentication failed. Please try again.', 'error');
+        resetBtn();
     }
 }
 
