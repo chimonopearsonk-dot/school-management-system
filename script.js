@@ -9729,22 +9729,52 @@ function setupSidebar() {
 // ============================================
 let activeModuleId = 'dashboard';
 
+/**
+ * Renders and updates the sidebar navigation links based on user role
+ */
 function renderSidebar() {
-    const navContainer = document.getElementById('main-nav');
-    if (!navContainer) return;
+    const sidebarNav = document.getElementById('sidebar-nav') || 
+                       document.getElementById('sidebar-menu') || 
+                       document.querySelector('.sidebar-nav') ||
+                       document.querySelector('#sidebar ul');
 
-    navContainer.innerHTML = APP_MODULES.map(module => {
-        const isActive = module.id === activeModuleId;
-        const activeStyles = isActive 
-            ? 'bg-indigo-700 text-white font-medium shadow' 
-            : 'text-indigo-200 hover:bg-indigo-700 hover:text-white';
+    if (!sidebarNav) return;
 
+    const currentRole = typeof getUserRole === 'function' ? getUserRole() : (currentUser?.role || 'Admin');
+    const currentRoute = (typeof Router !== 'undefined' && Router.current) ? Router.current : getDashboardForRole();
+
+    // Default module list if APP_MODULES is not globally accessible
+    const modules = (typeof APP_MODULES !== 'undefined' && Array.isArray(APP_MODULES)) ? APP_MODULES : [
+        { id: 'dashboard', label: 'Dashboard', icon: 'fa-tachometer-alt', roles: ['Admin', 'Teacher', 'Accountant'] },
+        { id: 'teacher-dashboard', label: 'Teacher Portal', icon: 'fa-chalkboard-teacher', roles: ['Teacher'] },
+        { id: 'accountant-dashboard', label: 'Finance Portal', icon: 'fa-calculator', roles: ['Accountant'] },
+        { id: 'students', label: 'Students', icon: 'fa-user-graduate', roles: ['Admin', 'Teacher'] },
+        { id: 'teachers', label: 'Teachers', icon: 'fa-users', roles: ['Admin'] },
+        { id: 'academics', label: 'Academics', icon: 'fa-book', roles: ['Admin', 'Teacher'] },
+        { id: 'finance', label: 'Finance', icon: 'fa-wallet', roles: ['Admin', 'Accountant'] },
+        { id: 'users', label: 'User Management', icon: 'fa-user-cog', roles: ['Admin'] },
+        { id: 'settings', label: 'Settings', icon: 'fa-cog', roles: ['Admin'] }
+    ];
+
+    // Filter modules based on user role
+    const allowedModules = modules.filter(mod => {
+        if (!mod.roles) return true;
+        return mod.roles.includes(currentRole);
+    });
+
+    // Generate Sidebar Links HTML
+    sidebarNav.innerHTML = allowedModules.map(mod => {
+        const isActive = (mod.id === currentRoute || (mod.id === 'dashboard' && currentRoute.includes('dashboard')));
         return `
-            <a href="#${module.id}" 
-               class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 mb-1 ${activeStyles}">
-                <i class="${module.icon} w-5 text-center text-lg flex-shrink-0"></i>
-                <span class="text-sm nav-label">${module.label}</span>
-            </a>
+            <li class="nav-item">
+                <a href="#${mod.id}" 
+                   class="nav-link ${isActive ? 'active' : ''}" 
+                   data-page="${mod.id}"
+                   onclick="event.preventDefault(); navigateTo('${mod.id}');">
+                    <i class="fas ${mod.icon || 'fa-folder'} nav-icon mr-2"></i>
+                    <span>${mod.label}</span>
+                </a>
+            </li>
         `;
     }).join('');
 }
@@ -9815,26 +9845,33 @@ function hideLoadingSpinner() {
 let currentUser = null;
 
 /**
- * Main Application Startup Function
- * Restores sidebar, navigation, seed data, and router initialization
+ * Main application initializer - transitions UI from Login view to Main App view
  */
 function initApp() {
-    // Show main application layout if hidden
-    const mainLayout = document.getElementById('app-layout') || document.getElementById('main-content');
-    if (mainLayout) {
-        mainLayout.style.display = 'block';
-        mainLayout.classList.remove('hidden');
+    // 1. Hide Login Screen / Modal / Form Container
+    const loginContainers = document.querySelectorAll('#login-screen, #login-modal, #login-container, .login-wrapper');
+    loginContainers.forEach(el => {
+        el.style.display = 'none';
+        el.classList.add('hidden');
+    });
+
+    // 2. Show Main App Layout Container & Sidebar
+    const appContainers = document.querySelectorAll('#app-layout, #main-layout, #app-container, .app-wrapper, #sidebar');
+    appContainers.forEach(el => {
+        el.style.display = '';
+        el.classList.remove('hidden');
+    });
+
+    // 3. Render Sidebar items dynamically for logged-in user
+    renderSidebar();
+
+    // 4. Update Header Profile & User Info
+    if (typeof updateUserProfile === 'function') {
+        updateUserProfile();
     }
 
-    // Hide login screen/form if visible
-    const loginScreen = document.getElementById('login-screen') || document.getElementById('login-modal');
-    if (loginScreen) {
-        loginScreen.style.display = 'none';
-        loginScreen.classList.add('hidden');
-    }
-
-    // Render navigation and initial view
-    refreshApp();
+    // 5. Dismiss all spinning indicators
+    hideLoadingSpinner();
 }
 
 /**
@@ -9977,57 +10014,32 @@ async function loginUser(event) {
         if (!authenticatedUser && matchedUser && matchedUser.password === passwordInput) {
             authenticatedUser = matchedUser;
         }
-
-        // 5. Handle Successful Authentication
+        
+        // Inside loginUser() -- Handle Successful Authentication Block:
         if (authenticatedUser) {
-            // Set global user session in memory & localStorage
             window.currentUser = authenticatedUser;
-            if (typeof setCurrentUser === 'function') {
-                setCurrentUser(authenticatedUser);
-            } else {
-                localStorage.setItem('currentUser', JSON.stringify(authenticatedUser));
-            }
-
-            // Update user profile display in UI header if present
-            if (typeof updateUserProfile === 'function') {
-                updateUserProfile();
-            }
+            currentUser = authenticatedUser;
+            localStorage.setItem('currentUser', JSON.stringify(authenticatedUser));
 
             showToast('Logged in successfully!', 'success');
 
-            // Hide login modal / overlay if applicable
-            const loginModal = document.getElementById('login-modal') || document.getElementById('login-screen');
-            if (loginModal) {
-                loginModal.classList.add('hidden');
-                loginModal.style.display = 'none';
+            // Instantly transition view from Login to App Layout
+            initApp();
+
+            // Resolve role target page
+            const targetPage = getDashboardForRole();
+
+            // Navigate without refreshing
+            if (typeof navigateTo === 'function') {
+                navigateTo(targetPage);
+            } else if (typeof Router !== 'undefined' && Router.navigate) {
+                Router.navigate(targetPage);
             }
 
-            // Determine route based on user role
-            let targetPage = 'dashboard';
-            if (typeof getDashboardForRole === 'function') {
-                targetPage = getDashboardForRole();
-            } else if (authenticatedUser.role === 'Teacher') {
-                targetPage = 'teacher-dashboard';
-            } else if (authenticatedUser.role === 'Accountant') {
-                targetPage = 'accountant-dashboard';
-            }
-
-            // Perform smooth navigation without freezing or requiring page reload
-            setTimeout(() => {
-                if (typeof Router !== 'undefined' && Router.navigate) {
-                    Router.navigate(targetPage);
-                } else if (typeof navigateTo === 'function') {
-                    navigateTo(targetPage);
-                } else if (typeof handleInitialRoute === 'function') {
-                    window.location.hash = targetPage;
-                    handleInitialRoute();
-                } else {
-                    window.location.reload();
-                }
-            }, 300);
-
+            // Sync navigation highlight and page content
+            refreshApp();
             return;
-        } 
+        }
 
         // 6. Handle Invalid Credentials
         showToast('Invalid username/email or password.', 'error');
