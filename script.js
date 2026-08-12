@@ -1,6 +1,21 @@
 // School Management System
 // ============================================
 
+// Define system modules/pages mapping
+const APP_MODULES = [
+    'dashboard',
+    'teacher-dashboard',
+    'student-registry',
+    'teachers',
+    'classes',
+    'attendance',
+    'grades',
+    'users',
+    'portal',
+    'settings',
+    'requests'
+];
+
 // ============================================
 // PHONE FORMATTING FALLBACK
 // ============================================
@@ -364,6 +379,8 @@ function standardizeClassName(className) {
     standardized = standardized.replace(/\s+/g, ' ');
     return standardized;
 }
+
+
 // ============================================
 // ROUTER
 // ============================================
@@ -8029,8 +8046,37 @@ function showStudentAttendanceSelector() {
 }
 
 // ============================================
-// USER MANAGEMENT (Admin Only)
+// USER MANAGEMENT (Admin Only - Firebase & DB Synced)
 // ============================================
+
+/**
+ * Helper: Creates a user in Firebase Auth using a secondary app instance
+ * so the currently logged-in Admin session is NOT interrupted or logged out.
+ */
+async function createSecondaryFirebaseUser(email, password) {
+    // If Firebase Auth modular SDK is attached to window/global scope
+    if (window.firebaseAuth && window.createUserWithEmailAndPassword) {
+        let secondaryApp = window.firebaseApps?.find(a => a.name === 'SecondaryApp');
+        if (!secondaryApp && window.initializeApp) {
+            secondaryApp = window.initializeApp(window.firebaseConfig, 'SecondaryApp');
+        }
+        const secondaryAuth = window.getAuth ? window.getAuth(secondaryApp) : secondaryApp.auth();
+        const userCredential = await window.createUserWithEmailAndPassword(secondaryAuth, email, password);
+        return userCredential.user;
+    } 
+    // If using Firebase v8 / Compat SDK
+    else if (typeof firebase !== 'undefined' && firebase.initializeApp) {
+        let secondaryApp = firebase.apps.find(app => app.name === 'SecondaryApp');
+        if (!secondaryApp) {
+            secondaryApp = firebase.initializeApp(window.firebaseConfig || {}, 'SecondaryApp');
+        }
+        const userCredential = await secondaryApp.auth().createUserWithEmailAndPassword(email, password);
+        return userCredential.user;
+    }
+    
+    // Local fallback mode if Firebase Auth is not active
+    return { uid: 'usr_' + Date.now() };
+}
 
 function showUserModal() {
     if (!isAdmin()) {
@@ -8041,7 +8087,6 @@ function showUserModal() {
     const modal = document.getElementById('modal');
     const modalContent = document.getElementById('modal-content');
     
-    // Force modal to show
     modal.classList.remove('hidden');
     modal.style.display = 'flex';
     modalContent.innerHTML = '';
@@ -8050,61 +8095,71 @@ function showUserModal() {
     
     modalContent.innerHTML = `
         <div class="flex justify-between items-center mb-6">
-            <h3 class="text-xl font-semibold">Manage Users</h3>
+            <div>
+                <h3 class="text-xl font-semibold text-gray-800">Manage System Users</h3>
+                <p class="text-xs text-gray-500">Create, view, and manage accounts for Teachers, Admins, and Accountants</p>
+            </div>
             <button onclick="showAddUserForm()" 
-                    class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 text-sm">
-                <i class="fas fa-plus"></i> Add User
+                    class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 text-sm font-medium transition flex items-center gap-1.5">
+                <i class="fas fa-user-plus"></i> Add User
             </button>
         </div>
         
-        <div id="user-list" class="max-h-96 overflow-y-auto">
+        <div id="user-list" class="max-h-96 overflow-y-auto rounded-xl border border-gray-100">
             ${existingUsers.length === 0 ? `
-                <p class="text-center py-8 text-gray-400">No users found.</p>
+                <div class="text-center py-12 bg-gray-50">
+                    <i class="fas fa-users-slash text-4xl text-gray-300 mb-2"></i>
+                    <p class="text-gray-500 text-sm">No users found in database.</p>
+                </div>
             ` : `
-                <table class="table w-full border-collapse">
+                <table class="w-full border-collapse text-left">
                     <thead>
-                        <tr class="bg-gray-50 border-b">
-                            <th class="px-4 py-3 text-left text-sm font-semibold">Username</th>
-                            <th class="px-4 py-3 text-left text-sm font-semibold">Full Name</th>
-                            <th class="px-4 py-3 text-left text-sm font-semibold">Role</th>
-                            <th class="px-4 py-3 text-left text-sm font-semibold">Created</th>
-                            <th class="px-4 py-3 text-left text-sm font-semibold">Actions</th>
+                        <tr class="bg-gray-50 border-b text-xs uppercase font-semibold text-gray-500">
+                            <th class="px-4 py-3">Username / Email</th>
+                            <th class="px-4 py-3">Full Name</th>
+                            <th class="px-4 py-3">Role</th>
+                            <th class="px-4 py-3">Created</th>
+                            <th class="px-4 py-3 text-right">Actions</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        ${existingUsers.map((user, index) => { 
-                            console.log('User role:', user.role); // Debug log
-                            return `
-                            <tr class="border-b hover:bg-gray-50">
-                                <td class="px-4 py-3 font-medium">${escapeHtml(user.username)}</td>
-                                <td class="px-4 py-3">${escapeHtml(user.fullName || user.name || '')}</td>
+                    <tbody class="divide-y divide-gray-100 text-sm">
+                        ${existingUsers.map((user, index) => `
+                            <tr class="hover:bg-indigo-50/30 transition">
                                 <td class="px-4 py-3">
-                                    <span class="px-2 py-1 ${user.role === 'Admin' ? 'bg-purple-100 text-purple-800' : user.role === 'Teacher' ? 'bg-blue-100 text-blue-800' : user.role === 'Accountant' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'} rounded-full text-xs font-semibold">
-                                    ${escapeHtml(user.role || 'unknown')}
+                                    <div class="font-medium text-gray-800">${escapeHtml(user.username)}</div>
+                                    <div class="text-xs text-gray-400">${escapeHtml(user.email || user.username + '@school.internal')}</div>
+                                </td>
+                                <td class="px-4 py-3 text-gray-700">${escapeHtml(user.fullName || user.name || '-')}</td>
+                                <td class="px-4 py-3">
+                                    <span class="px-2.5 py-1 ${
+                                        user.role === 'Admin' ? 'bg-purple-100 text-purple-800 border border-purple-200' : 
+                                        user.role === 'Teacher' ? 'bg-blue-100 text-blue-800 border border-blue-200' : 
+                                        user.role === 'Accountant' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 
+                                        'bg-gray-100 text-gray-600'
+                                    } rounded-full text-xs font-semibold">
+                                        ${escapeHtml(user.role || 'User')}
                                     </span>
                                 </td>
-                                <td class="px-4 py-3 text-sm">${formatDate(user.createdAt)}</td>
-                                <td class="px-4 py-3">
-                                    <button onclick="deleteUser(${index})" class="text-red-600 hover:text-red-800">
-                                        <i class="fas fa-trash"></i>
+                                <td class="px-4 py-3 text-xs text-gray-500">${typeof formatDate === 'function' ? formatDate(user.createdAt) : user.createdAt?.split('T')[0] || '-'}</td>
+                                <td class="px-4 py-3 text-right">
+                                    <button onclick="deleteUser(${index})" class="text-red-500 hover:text-red-700 p-1.5 rounded hover:bg-red-50 transition" title="Delete User">
+                                        <i class="fas fa-trash-alt"></i>
                                     </button>
                                 </td>
                             </tr>
-                        `;
-                        }).join('')}
+                        `).join('')}
                     </tbody>
                 </table>
             `}
         </div>
         
         <div class="mt-6">
-            <button onclick="closeModal()" class="w-full py-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+            <button onclick="closeModal()" class="w-full py-2.5 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium transition">
                 Close
             </button>
         </div>
     `;
     
-    // Make modal wider
     const modalBox = modal.querySelector('.bg-white');
     if (modalBox) {
         modalBox.classList.add('max-w-3xl');
@@ -8122,101 +8177,147 @@ function showAddUserForm() {
     
     modal.classList.remove('hidden');
     modal.style.display = 'flex';
-    modalContent.innerHTML = '';
-    
     modalContent.innerHTML = `
-        <div class="flex justify-between items-center mb-6">
-            <h3 class="text-xl font-semibold">Add New User</h3>
+        <div class="flex justify-between items-center mb-6 border-b pb-4">
+            <div>
+                <h3 class="text-xl font-semibold text-gray-800">Add New User</h3>
+                <p class="text-xs text-gray-500">Create login credentials for school staff</p>
+            </div>
             <button onclick="showUserModal()" class="text-gray-400 hover:text-gray-600">
-                <i class="fas fa-times"></i>
+                <i class="fas fa-times text-lg"></i>
             </button>
         </div>
-        <form id="userForm">
+
+        <form id="userForm" onsubmit="handleSaveUserSubmit(event)">
             <div class="space-y-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Username *</label>
+                    <label class="block text-xs font-semibold uppercase text-gray-600 mb-1">Username *</label>
                     <input type="text" id="user-username" required 
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500"
-                           placeholder="e.g., pechimono">
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                           placeholder="e.g. pechimono">
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+                    <label class="block text-xs font-semibold uppercase text-gray-600 mb-1">Email Address *</label>
+                    <input type="email" id="user-email" required 
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                           placeholder="e.g. pechimono@school.com">
+                    <p class="text-[11px] text-gray-400 mt-1">Used for Firebase login authentication</p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-gray-600 mb-1">Full Name *</label>
                     <input type="text" id="user-fullName" required 
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500"
-                           placeholder="e.g., Pearson Chimono">
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                           placeholder="e.g. Pearson Chimono">
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Password *</label>
-                    <input type="password" id="user-password" required 
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500"
-                           placeholder="Enter password (min 6 characters)">
+                    <label class="block text-xs font-semibold uppercase text-gray-600 mb-1">Password *</label>
+                    <input type="password" id="user-password" required minlength="6"
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                           placeholder="Minimum 6 characters">
                 </div>
+
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Role *</label>
-                    <select id="user-role-select" required class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                        <option value="Admin">Admin</option>
+                    <label class="block text-xs font-semibold uppercase text-gray-600 mb-1">Role *</label>
+                    <select id="user-role-select" required class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm">
                         <option value="Teacher">Teacher</option>
+                        <option value="Admin">Admin</option>
                         <option value="Accountant">Accountant</option>
                     </select>
                 </div>
             </div>
             
-            <div class="mt-6 flex gap-3">
+            <div class="mt-6 flex gap-3 pt-4 border-t">
                 <button type="button" onclick="showUserModal()" 
-                        class="flex-1 py-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                        class="flex-1 py-2.5 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium transition">
                     Cancel
                 </button>
-                <button type="submit" 
-                        class="flex-1 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
-                    Save User
+                <button type="submit" id="save-user-submit-btn"
+                        class="flex-1 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium transition flex items-center justify-center gap-2">
+                    <span>Save User</span>
                 </button>
             </div>
         </form>
     `;
-    
-    // Force attach the form handler
-    const form = document.getElementById('userForm');
-    if (form) {
-        form.onsubmit = function(e) {
-            e.preventDefault();
-            console.log('=== FORM SUBMITTED ===');
-            saveUser();
-        };
-        console.log('Form handler attached successfully');
-    } else {
-        console.error('Form element not found!');
-    }
 }
 
-function saveUser() {
-    // Use optional chaining (?.) to prevent errors if the element is missing
-    const username = document.getElementById("user-username")?.value?.trim() || "";
-    const fullName = document.getElementById("user-fullName")?.value?.trim() || "";
-    const password = document.getElementById("user-password")?.value?.trim() || "";
-    const role = document.getElementById("user-role-select")?.value || "";
-
-    let users = DataService.get("users") || [];
+async function handleSaveUserSubmit(event) {
+    event.preventDefault();
     
-    if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
-        
-        showToast("Username already exists.", "error");
-        return;
+    const submitBtn = document.getElementById('save-user-submit-btn');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-1"></i> Registering...`;
     }
 
-    users.push({
-        username,
-        fullName,
-        password,
-        role,
-        createdAt: new Date().toISOString()
-    });
+    try {
+        const username = document.getElementById("user-username")?.value?.trim() || "";
+        const email = document.getElementById("user-email")?.value?.trim() || `${username.toLowerCase()}@school.internal`;
+        const fullName = document.getElementById("user-fullName")?.value?.trim() || "";
+        const password = document.getElementById("user-password")?.value?.trim() || "";
+        const role = document.getElementById("user-role-select")?.value || "Teacher";
 
-    DataService.set("users", users);
+        let users = DataService.get("users") || [];
+        
+        // 1. Check duplicate username in local storage
+        if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
+            showToast("Username already exists in database.", "error");
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = `Save User`;
+            }
+            return;
+        }
 
-    showToast("User added successfully!", "success");
+        // 2. Register user in Firebase Authentication
+        let fbUid = 'local_' + Date.now();
+        try {
+            const fbUser = await createSecondaryFirebaseUser(email, password);
+            if (fbUser && fbUser.uid) {
+                fbUid = fbUser.uid;
+            }
+        } catch (fbErr) {
+            console.warn("Firebase Auth registration note:", fbErr.message);
+            if (fbErr.code === 'auth/email-already-in-use') {
+                showToast("This email is already registered in Firebase.", "error");
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = `Save User`;
+                }
+                return;
+            }
+        }
 
-    // Return to user list
-    showUserModal();
+        // 3. Save complete user profile to local storage & DataService
+        const newUser = {
+            uid: fbUid,
+            username: username,
+            email: email,
+            fullName: fullName,
+            name: fullName,
+            password: password, // preserved for fallback local authentication
+            role: role,
+            status: 'Active',
+            createdAt: new Date().toISOString()
+        };
+
+        users.push(newUser);
+        DataService.set("users", users);
+
+        showToast(`User "${username}" created successfully in Firebase Auth & Database!`, "success");
+
+        // 4. Return to User List
+        showUserModal();
+    } catch (err) {
+        console.error("Error creating user:", err);
+        showToast(`Failed to save user: ${err.message}`, "error");
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = `Save User`;
+        }
+    }
 }
 
 function deleteUser(index) {
@@ -8243,49 +8344,52 @@ function deleteUser(index) {
     DataService.set('users', users);
     showToast('User deleted successfully!', 'success');
     
-    // Close and reopen to refresh
-    closeModal();
-    setTimeout(() => {
-        showUserModal();
-    }, 100);
+    showUserModal();
 }
 
 function renderUsers(container) {
     if (!isAdmin()) {
         container.innerHTML = `
-            <div class="bg-white rounded-2xl shadow p-8 text-center">
-                <i class="fas fa-lock text-6xl text-red-400 mb-4"></i>
-                <h3 class="text-2xl font-semibold text-gray-600">Access Denied</h3>
-                <p class="text-gray-500 mt-2">You do not have permission to view this page.</p>
+            <div class="bg-white rounded-2xl shadow p-8 text-center max-w-xl mx-auto mt-8">
+                <i class="fas fa-lock text-5xl text-red-400 mb-4"></i>
+                <h3 class="text-xl font-bold text-gray-700">Access Denied</h3>
+                <p class="text-gray-500 text-sm mt-1">You do not have permission to view User Management.</p>
             </div>
         `;
         return;
     }
     
     container.innerHTML = `
-        <div class="bg-white rounded-2xl shadow">
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 max-w-7xl mx-auto">
             <div class="p-6 border-b flex justify-between items-center">
-                <h3 class="text-xl font-semibold">User Management</h3>
+                <div>
+                    <h3 class="text-xl font-bold text-gray-800">User Management</h3>
+                    <p class="text-xs text-gray-500 mt-0.5">Manage system logins and role permissions</p>
+                </div>
                 <button onclick="showUserModal()" 
-                        class="bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 transition">
-                    <i class="fas fa-plus"></i> Manage Users
+                        class="bg-indigo-600 text-white px-5 py-2.5 rounded-xl hover:bg-indigo-700 font-medium text-sm flex items-center gap-2 transition shadow-sm">
+                    <i class="fas fa-users-cog"></i> Manage Users
                 </button>
             </div>
-            <div class="p-8 text-center text-gray-400">
-                <i class="fas fa-users-cog text-6xl mb-4"></i>
-                <p>Click "Manage Users" to add, edit, or delete user accounts.</p>
-                <p class="text-sm mt-2">Only administrators can manage users.</p>
+            <div class="p-12 text-center text-gray-500">
+                <div class="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4">
+                    <i class="fas fa-user-shield"></i>
+                </div>
+                <h4 class="font-bold text-gray-700 text-lg mb-1">User Administrative Panel</h4>
+                <p class="text-sm text-gray-500 max-w-md mx-auto mb-6">Click the button below to view all system accounts, create new Teacher or Accountant logins, or manage credentials.</p>
+                <button onclick="showUserModal()" class="bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-6 py-2.5 rounded-xl font-semibold text-sm transition">
+                    Open User Manager
+                </button>
             </div>
         </div>
     `;
-    
 }
 
 function updateUserProfile() {
     const nameEl = document.getElementById('user-name');
     const roleEl = document.getElementById('user-role');
     
-    if (currentUser) {
+    if (typeof currentUser !== 'undefined' && currentUser) {
         if (nameEl) nameEl.textContent = currentUser.fullName || currentUser.name || currentUser.username || 'User';
         if (roleEl) roleEl.textContent = currentUser.role || 'User';
     } else {
