@@ -493,6 +493,25 @@ function setupNavigation() {
 
 
 }
+function navigateTo(moduleId) {
+    const targetModule = APP_MODULES.find(m => m.id === moduleId);
+    if (!targetModule) return;
+
+    activeModuleId = moduleId;
+
+    // Update URL hash without causing page reload
+    if (window.location.hash !== `#${moduleId}`) {
+        window.location.hash = moduleId;
+    }
+
+    renderSidebar();
+
+    const mainContainer = document.getElementById('main-content');
+    if (mainContainer && typeof targetModule.render === 'function') {
+        mainContainer.innerHTML = '';
+        targetModule.render(mainContainer);
+    }
+}
 
 // ============================================
 // SCHOOL SETTINGS
@@ -9229,7 +9248,6 @@ function renderSidebar() {
     const navContainer = document.getElementById('main-nav');
     if (!navContainer) return;
 
-    // Use your current active module list
     navContainer.innerHTML = APP_MODULES.map(module => {
         const isActive = module.id === activeModuleId;
         const activeStyles = isActive 
@@ -9237,7 +9255,7 @@ function renderSidebar() {
             : 'text-indigo-200 hover:bg-indigo-700 hover:text-white';
 
         return `
-            <a href="#" onclick="navigateTo('${module.id}'); return false;" 
+            <a href="#${module.id}" onclick="navigateTo('${module.id}'); return false;" 
                class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 mb-1 ${activeStyles}">
                 <i class="${module.icon} w-5 text-center text-lg"></i>
                 <span class="text-sm nav-label ${isSidebarCollapsed ? 'hidden' : ''}">${module.label}</span>
@@ -9245,6 +9263,7 @@ function renderSidebar() {
         `;
     }).join('');
 }
+
 
 // ============================================
 // PLACEHOLDER PAGES
@@ -9706,6 +9725,20 @@ if (typeof auth !== 'undefined' && auth) {
         }
     });
 }
+
+function handleInitialRoute() {
+    // Extract module name from URL (e.g., "#students" becomes "students")
+    const hash = window.location.hash.replace('#', '');
+    const validModule = APP_MODULES.find(m => m.id === hash);
+
+    // Fall back to 'dashboard' if hash is missing or invalid
+    const initialModule = validModule ? validModule.id : 'dashboard';
+    navigateTo(initialModule);
+}
+
+// Listen for page refresh and browser history back/forward actions
+window.addEventListener('DOMContentLoaded', handleInitialRoute);
+window.addEventListener('hashchange', handleInitialRoute);
 
 // Global scope exports for console debugging and HTML handlers
 window.initApp = initApp;
