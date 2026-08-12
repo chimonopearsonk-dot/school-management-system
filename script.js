@@ -643,30 +643,128 @@ function renderDashboard(container) {
     `;
 }
 
-function refreshDashboard() {
-    const content = document.getElementById('content');
-    if (Router.current === 'dashboard') {
-        renderDashboard(content);
-    }
-}
+// ============================================
+// COMPREHENSIVE REFRESH & ROUTING SYSTEM
+// ============================================
 
-function refreshCurrentPage() {
-    const container = document.getElementById('content');
-    if (container && Router.current) {
-        const page = Router.pages[Router.current];
-        if (page && page.render) {
-            page.render(container);
-        }
-    }
-}
-
+/**
+ * Gets the default landing page for the currently logged-in user role
+ */
 function getDashboardForRole() {
-    const role = getUserRole();
+    const role = typeof getUserRole === 'function' ? getUserRole() : (currentUser?.role || 'Admin');
     if (role === 'Admin') return 'dashboard';
     if (role === 'Teacher') return 'teacher-dashboard';
     if (role === 'Accountant') return 'accountant-dashboard';
     return 'dashboard';
 }
+
+/**
+ * Role-aware dashboard refresh handler
+ */
+function refreshDashboard() {
+    const content = document.getElementById('content');
+    if (!content) return;
+    
+    const targetDashboard = getDashboardForRole();
+    
+    // Set Router state if available
+    if (typeof Router !== 'undefined') {
+        Router.current = targetDashboard;
+    }
+
+    if (targetDashboard === 'teacher-dashboard' && typeof renderTeacherDashboard === 'function') {
+        renderTeacherDashboard(content);
+    } else if (targetDashboard === 'accountant-dashboard' && typeof renderAccountantDashboard === 'function') {
+        renderAccountantDashboard(content);
+    } else if (typeof renderDashboard === 'function') {
+        renderDashboard(content);
+    }
+}
+
+/**
+ * Re-renders the current page view with robust fallbacks
+ */
+function refreshCurrentPage() {
+    const container = document.getElementById('content');
+    if (!container) return;
+
+    // Ensure we have a valid current route; if missing, fallback to user's role dashboard
+    if (typeof Router !== 'undefined') {
+        if (!Router.current || !Router.pages || !Router.pages[Router.current]) {
+            Router.current = getDashboardForRole();
+        }
+
+        const page = Router.pages[Router.current];
+        if (page && typeof page.render === 'function') {
+            page.render(container);
+        } else if (typeof Router.navigate === 'function') {
+            Router.navigate(Router.current);
+            return;
+        } else {
+            refreshDashboard();
+            return;
+        }
+    } else {
+        refreshDashboard();
+        return;
+    }
+
+    // Refresh UI elements (headers, sidebar, permissions)
+    refreshUIState();
+}
+
+/**
+ * Synchronizes header titles, sidebar active links, role-based nav visibility, and user profile
+ */
+function refreshUIState() {
+    // 1. Update Header User Profile Display
+    if (typeof updateUserProfile === 'function') {
+        updateUserProfile();
+    }
+
+    const currentRoute = (typeof Router !== 'undefined' && Router.current) ? Router.current : getDashboardForRole();
+    const currentRole = typeof getUserRole === 'function' ? getUserRole() : (currentUser?.role || 'Admin');
+
+    // 2. Update Header Title
+    const titleEl = document.getElementById('page-title');
+    if (titleEl) {
+        if (typeof Router !== 'undefined' && Router.pages && Router.pages[currentRoute]) {
+            titleEl.textContent = Router.pages[currentRoute].title;
+        } else {
+            titleEl.textContent = currentRoute.replace('-', ' ').toUpperCase();
+        }
+    }
+
+    // 3. Sync Navigation Links & Role Permissions
+    document.querySelectorAll('.nav-link').forEach(link => {
+        const pageKey = link.dataset.page;
+        
+        // Highlight active link
+        link.classList.toggle('active', pageKey === currentRoute);
+
+        // Hide admin-only links from Teachers and Accountants
+        const isAdminOnly = link.dataset.adminOnly === 'true' || ['users', 'settings', 'teachers'].includes(pageKey);
+        if (isAdminOnly && currentRole !== 'Admin') {
+            link.style.display = 'none';
+        } else {
+            link.style.display = '';
+        }
+    });
+
+    // 4. Ensure top-right global add button stays hidden if required
+    if (typeof Router !== 'undefined' && typeof Router.updateUI === 'function') {
+        Router.updateUI();
+    }
+}
+
+/**
+ * Full application refresh triggered after login, logout, or hard refresh (F5)
+ */
+function refreshApp() {
+    refreshUIState();
+    refreshCurrentPage();
+}
+
 async function renderTeacherDashboard(container) {
     if (!container) return;
     
@@ -10017,22 +10115,85 @@ function requireAuth() {
 /**
  * DOM Loaded & Auth Observer Entry Points
  */
+// ============================================
+// INITIALIZATION & ROUTE HANDLERS
+// ============================================
+
+/**
+ * Handles initial page load and hash changes (F5 / Back / Forward)
+ */
+function handleInitialRoute() {
+    // 1. Ensure user session is hydrated from localStorage if memory state was cleared by refresh
+    if (!currentUser) {
+        const savedUser = localStorage.getItem('currentUser');
+        if (savedUser) {
+            try {
+                currentUser = JSON.parse(savedUser);
+                window.currentUser = currentUser;
+            } catch (e) {
+                console.error("Error parsing saved session user:", e);
+            }
+        }
+    }
+
+    // 2. If no user is logged in, show login page
+    if (!currentUser && (!window.firebaseAuth || !window.firebaseAuth.currentUser)) {
+        if (typeof showLoginPage === 'function') showLoginPage();
+        return;
+    }
+
+    // 3. Resolve target module route
+    const hash = window.location.hash.replace('#', '');
+    const validModule = (typeof APP_MODULES !== 'undefined') ? APP_MODULES.find(m => m.id === hash) : null;
+
+    // Fall back to role-specific dashboard (NOT hardcoded 'dashboard')
+    const targetModule = validModule ? validModule.id : getDashboardForRole();
+
+    // 4. Navigate and run full app refresh
+    if (typeof navigateTo === 'function') {
+        navigateTo(targetModule);
+    } else if (typeof Router !== 'undefined' && typeof Router.navigate === 'function') {
+        Router.navigate(targetModule);
+    }
+
+    // 5. Sync UI states, user profiles, and navigation links
+    if (typeof refreshApp === 'function') {
+        refreshApp();
+    }
+}
+
+// Single, clean DOMContentLoaded Event Listener
 document.addEventListener('DOMContentLoaded', () => {
-    if (checkAuth()) {
-        initApp();
+    // Restore session if available
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser && !currentUser) {
+        try {
+            currentUser = JSON.parse(savedUser);
+            window.currentUser = currentUser;
+        } catch (e) {}
+    }
+
+    if (currentUser) {
+        if (typeof initApp === 'function') initApp();
+        handleInitialRoute();
+    } else {
+        if (typeof showLoginPage === 'function') showLoginPage();
     }
 });
 
+// Firebase Auth Observer (Preserves Local DB sessions during fallback)
 if (typeof auth !== 'undefined' && auth) {
     auth.onAuthStateChanged(async (fbUser) => {
         if (fbUser) {
-            if (!currentUser) {
+            // Fetch/Sync user details from Firestore if connected
+            if (!currentUser || currentUser.uid !== fbUser.uid) {
                 currentUser = {
                     uid: fbUser.uid,
                     email: fbUser.email,
-                    username: fbUser.email.split('@')[0],
+                    username: fbUser.email ? fbUser.email.split('@')[0] : 'User',
                     role: 'Admin'
                 };
+
                 try {
                     if (typeof db !== 'undefined' && db) {
                         const docSnap = await db.collection('users').doc(fbUser.uid).get();
@@ -10045,25 +10206,33 @@ if (typeof auth !== 'undefined' && auth) {
                 } catch (e) {
                     console.warn("Firestore sync warning:", e);
                 }
+
                 localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                window.currentUser = currentUser;
             }
-            initApp();
+
+            if (typeof initApp === 'function') initApp();
+            if (typeof refreshApp === 'function') refreshApp();
+
         } else {
+            // BEFORE WIPING: Check if user exists via Local DB login backup
+            const savedUser = localStorage.getItem('currentUser');
+            if (savedUser) {
+                try {
+                    currentUser = JSON.parse(savedUser);
+                    window.currentUser = currentUser;
+                    // Preserve local user without clearing session
+                    return;
+                } catch (e) {}
+            }
+
+            // No active session in Firebase or Local DB -> Clear and redirect to login
             currentUser = null;
+            window.currentUser = null;
             localStorage.removeItem('currentUser');
-            showLoginPage();
+            if (typeof showLoginPage === 'function') showLoginPage();
         }
     });
-}
-
-function handleInitialRoute() {
-    // Extract module name from URL (e.g., "#students" becomes "students")
-    const hash = window.location.hash.replace('#', '');
-    const validModule = APP_MODULES.find(m => m.id === hash);
-
-    // Fall back to 'dashboard' if hash is missing or invalid
-    const initialModule = validModule ? validModule.id : 'dashboard';
-    navigateTo(initialModule);
 }
 
 // Listen for page refresh and browser history back/forward actions
