@@ -415,27 +415,11 @@ const Router = {
             link.classList.toggle('active', link.dataset.page === this.current);
         });
         
-        // 3. Configure top-right global action button per page
+        // 3. Hide global top-right action button across all pages
         const btnText = document.getElementById('add-btn-text');
         if (btnText) {
             const actionBtn = btnText.closest('button') || btnText.parentElement;
-            
-            // Explicit configuration for pages that require top-right action buttons
-            const pageActions = {
-                'teachers': { text: 'Add Teacher', action: () => typeof showAddTeacherModal === 'function' && showAddTeacherModal() },
-                'classes': { text: 'Add Class', action: () => typeof showAddClassModal === 'function' && showAddClassModal() },
-                'users': { text: 'Add User', action: () => typeof showAddUserModal === 'function' && showAddUserModal() }
-            };
-
-            const config = pageActions[this.current];
-
-            if (config && actionBtn) {
-                actionBtn.style.display = 'inline-flex';
-                btnText.textContent = config.text;
-                actionBtn.onclick = config.action;
-            } else if (actionBtn) {
-                // Hide top-right action button for all other pages:
-                // dashboard, teacher-dashboard, student-registry, attendance, grades, portal, settings, requests
+            if (actionBtn) {
                 actionBtn.style.display = 'none';
                 actionBtn.onclick = null;
             }
