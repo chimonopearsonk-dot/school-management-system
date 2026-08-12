@@ -8153,7 +8153,6 @@ function showStudentAttendanceSelector() {
  * so the currently logged-in Admin session is NOT interrupted or logged out.
  */
 async function createSecondaryFirebaseUser(email, password) {
-    // If Firebase Auth modular SDK is attached to window/global scope
     if (window.firebaseAuth && window.createUserWithEmailAndPassword) {
         let secondaryApp = window.firebaseApps?.find(a => a.name === 'SecondaryApp');
         if (!secondaryApp && window.initializeApp) {
@@ -8162,9 +8161,7 @@ async function createSecondaryFirebaseUser(email, password) {
         const secondaryAuth = window.getAuth ? window.getAuth(secondaryApp) : secondaryApp.auth();
         const userCredential = await window.createUserWithEmailAndPassword(secondaryAuth, email, password);
         return userCredential.user;
-    } 
-    // If using Firebase v8 / Compat SDK
-    else if (typeof firebase !== 'undefined' && firebase.initializeApp) {
+    } else if (typeof firebase !== 'undefined' && firebase.initializeApp) {
         let secondaryApp = firebase.apps.find(app => app.name === 'SecondaryApp');
         if (!secondaryApp) {
             secondaryApp = firebase.initializeApp(window.firebaseConfig || {}, 'SecondaryApp');
@@ -8172,23 +8169,16 @@ async function createSecondaryFirebaseUser(email, password) {
         const userCredential = await secondaryApp.auth().createUserWithEmailAndPassword(email, password);
         return userCredential.user;
     }
-    
-    // Local fallback mode if Firebase Auth is not active
     return { uid: 'usr_' + Date.now() };
 }
 
 function showUserModal() {
-    if (!isAdmin()) {
-        showToast('Access denied! Admin only.', 'error');
-        return;
-    }
-    
     const modal = document.getElementById('modal');
     const modalContent = document.getElementById('modal-content');
-    
+    if (!modal || !modalContent) return;
+
     modal.classList.remove('hidden');
     modal.style.display = 'flex';
-    modalContent.innerHTML = '';
 
     const existingUsers = DataService.get('users') || [];
     
@@ -8196,7 +8186,7 @@ function showUserModal() {
         <div class="flex justify-between items-center mb-6">
             <div>
                 <h3 class="text-xl font-semibold text-gray-800">Manage System Users</h3>
-                <p class="text-xs text-gray-500">Create, view, and manage accounts for Teachers, Admins, and Accountants</p>
+                <p class="text-xs text-gray-500">Create, view, and manage staff accounts</p>
             </div>
             <button onclick="showAddUserForm()" 
                     class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 text-sm font-medium transition flex items-center gap-1.5">
@@ -8208,7 +8198,7 @@ function showUserModal() {
             ${existingUsers.length === 0 ? `
                 <div class="text-center py-12 bg-gray-50">
                     <i class="fas fa-users-slash text-4xl text-gray-300 mb-2"></i>
-                    <p class="text-gray-500 text-sm">No users found in database.</p>
+                    <p class="text-gray-500 text-sm">No users found.</p>
                 </div>
             ` : `
                 <table class="w-full border-collapse text-left">
@@ -8217,7 +8207,6 @@ function showUserModal() {
                             <th class="px-4 py-3">Username / Email</th>
                             <th class="px-4 py-3">Full Name</th>
                             <th class="px-4 py-3">Role</th>
-                            <th class="px-4 py-3">Created</th>
                             <th class="px-4 py-3 text-right">Actions</th>
                         </tr>
                     </thead>
@@ -8226,22 +8215,20 @@ function showUserModal() {
                             <tr class="hover:bg-indigo-50/30 transition">
                                 <td class="px-4 py-3">
                                     <div class="font-medium text-gray-800">${escapeHtml(user.username)}</div>
-                                    <div class="text-xs text-gray-400">${escapeHtml(user.email || user.username + '@school.internal')}</div>
+                                    <div class="text-xs text-gray-400">${escapeHtml(user.email || user.username + '@school.com')}</div>
                                 </td>
                                 <td class="px-4 py-3 text-gray-700">${escapeHtml(user.fullName || user.name || '-')}</td>
                                 <td class="px-4 py-3">
                                     <span class="px-2.5 py-1 ${
-                                        user.role === 'Admin' ? 'bg-purple-100 text-purple-800 border border-purple-200' : 
-                                        user.role === 'Teacher' ? 'bg-blue-100 text-blue-800 border border-blue-200' : 
-                                        user.role === 'Accountant' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 
-                                        'bg-gray-100 text-gray-600'
+                                        user.role === 'Admin' ? 'bg-purple-100 text-purple-800' : 
+                                        user.role === 'Teacher' ? 'bg-blue-100 text-blue-800' : 
+                                        'bg-emerald-100 text-emerald-800'
                                     } rounded-full text-xs font-semibold">
                                         ${escapeHtml(user.role || 'User')}
                                     </span>
                                 </td>
-                                <td class="px-4 py-3 text-xs text-gray-500">${typeof formatDate === 'function' ? formatDate(user.createdAt) : user.createdAt?.split('T')[0] || '-'}</td>
                                 <td class="px-4 py-3 text-right">
-                                    <button onclick="deleteUser(${index})" class="text-red-500 hover:text-red-700 p-1.5 rounded hover:bg-red-50 transition" title="Delete User">
+                                    <button onclick="deleteUser(${index})" class="text-red-500 hover:text-red-700 p-1.5 rounded hover:bg-red-50 transition">
                                         <i class="fas fa-trash-alt"></i>
                                     </button>
                                 </td>
@@ -8258,24 +8245,11 @@ function showUserModal() {
             </button>
         </div>
     `;
-    
-    const modalBox = modal.querySelector('.bg-white');
-    if (modalBox) {
-        modalBox.classList.add('max-w-3xl');
-    }
 }
-
 function showAddUserForm() {
-    if (!isAdmin()) {
-        showToast('Access denied! Admin only.', 'error');
-        return;
-    }
-    
-    const modal = document.getElementById('modal');
     const modalContent = document.getElementById('modal-content');
-    
-    modal.classList.remove('hidden');
-    modal.style.display = 'flex';
+    if (!modalContent) return;
+
     modalContent.innerHTML = `
         <div class="flex justify-between items-center mb-6 border-b pb-4">
             <div>
@@ -8292,29 +8266,28 @@ function showAddUserForm() {
                 <div>
                     <label class="block text-xs font-semibold uppercase text-gray-600 mb-1">Username *</label>
                     <input type="text" id="user-username" required 
-                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
                            placeholder="e.g. pechimono">
                 </div>
 
                 <div>
                     <label class="block text-xs font-semibold uppercase text-gray-600 mb-1">Email Address *</label>
                     <input type="email" id="user-email" required 
-                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
                            placeholder="e.g. pechimono@school.com">
-                    <p class="text-[11px] text-gray-400 mt-1">Used for Firebase login authentication</p>
                 </div>
 
                 <div>
                     <label class="block text-xs font-semibold uppercase text-gray-600 mb-1">Full Name *</label>
                     <input type="text" id="user-fullName" required 
-                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
                            placeholder="e.g. Pearson Chimono">
                 </div>
 
                 <div>
                     <label class="block text-xs font-semibold uppercase text-gray-600 mb-1">Password *</label>
                     <input type="password" id="user-password" required minlength="6"
-                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
                            placeholder="Minimum 6 characters">
                 </div>
 
@@ -8334,8 +8307,8 @@ function showAddUserForm() {
                     Cancel
                 </button>
                 <button type="submit" id="save-user-submit-btn"
-                        class="flex-1 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium transition flex items-center justify-center gap-2">
-                    <span>Save User</span>
+                        class="flex-1 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium transition">
+                    Save User
                 </button>
             </div>
         </form>
@@ -8344,113 +8317,85 @@ function showAddUserForm() {
 
 async function handleSaveUserSubmit(event) {
     if (event) event.preventDefault();
-
-    const username = document.getElementById('user-username')?.value?.trim();
-    const emailInput = document.getElementById('user-email')?.value?.trim();
-    const password = document.getElementById('user-password')?.value?.trim();
-    const role = document.getElementById('user-role')?.value || 'Teacher';
-    const fullName = document.getElementById('user-fullname')?.value?.trim() || username;
-
-    if (!username || !password) {
-        showToast('Please provide both a username and a password.', 'error');
-        return;
-    }
-
-    if (password.length < 6) {
-        showToast('Password must be at least 6 characters long.', 'error');
-        return;
-    }
-
-    const email = emailInput || `${username.toLowerCase()}@school.com`;
-    const submitBtn = event.target.querySelector('button[type="submit"]');
     
+    const submitBtn = document.getElementById('save-user-submit-btn');
     if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i> Saving...`;
+        submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-1"></i> Saving...`;
     }
 
     try {
-        // 1. Save to Local DataService
-        const users = DataService.get('users') || [];
-        const existingIndex = users.findIndex(u => u.username?.toLowerCase() === username.toLowerCase());
+        const username = document.getElementById("user-username")?.value?.trim() || "";
+        const email = document.getElementById("user-email")?.value?.trim() || `${username.toLowerCase()}@school.com`;
+        const fullName = document.getElementById("user-fullName")?.value?.trim() || "";
+        const password = document.getElementById("user-password")?.value?.trim() || "";
+        const role = document.getElementById("user-role-select")?.value || "Teacher";
 
-        const newUserObj = {
-            id: existingIndex >= 0 ? users[existingIndex].id : Date.now().toString(),
-            username,
-            email,
-            password,
-            role,
-            fullName,
+        let users = DataService.get("users") || [];
+        
+        if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
+            showToast("Username already exists.", "error");
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = `Save User`;
+            }
+            return;
+        }
+
+        let fbUid = 'usr_' + Date.now();
+        try {
+            const fbUser = await createSecondaryFirebaseUser(email, password);
+            if (fbUser && fbUser.uid) fbUid = fbUser.uid;
+        } catch (fbErr) {
+            console.warn("Background auth sync status:", fbErr.message);
+        }
+
+        const newUser = {
+            uid: fbUid,
+            username: username,
+            email: email,
+            fullName: fullName,
+            password: password,
+            role: role,
             createdAt: new Date().toISOString()
         };
 
-        if (existingIndex >= 0) {
-            users[existingIndex] = newUserObj;
-        } else {
-            users.push(newUserObj);
-        }
+        users.push(newUser);
+        DataService.set("users", users);
 
-        DataService.set('users', users);
-
-        // 2. Secondary Firebase Auth Sync (Runs quietly in background)
-        if (window.firebaseConfig && typeof firebase !== 'undefined') {
-            try {
-                let secondaryApp = firebase.apps.find(app => app.name === 'SecondaryApp');
-                if (!secondaryApp) {
-                    secondaryApp = firebase.initializeApp(window.firebaseConfig, 'SecondaryApp');
-                }
-                await secondaryApp.auth().createUserWithEmailAndPassword(email, password);
-                await secondaryApp.auth().signOut();
-            } catch (fbErr) {
-                // Silently handle existing accounts without throwing user-facing tech errors
-                console.warn('Background account sync status:', fbErr.code);
-            }
-        }
-
-        // 3. User-Friendly Notification
-        showToast('User added successfully!', 'success');
-
-        // Close Modal & Refresh User List
-        if (typeof closeModal === 'function') closeModal('user-modal');
-        if (typeof renderUsersPage === 'function') renderUsersPage();
-        refreshCurrentPage();
+        showToast("User added successfully!", "success");
+        showUserModal();
 
     } catch (err) {
-        console.error('Save user error:', err);
-        showToast('Failed to save user. Please try again.', 'error');
-    } finally {
+        console.error("Error saving user:", err);
+        showToast("Failed to save user.", "error");
         if (submitBtn) {
             submitBtn.disabled = false;
-            submitBtn.innerHTML = 'Save User';
+            submitBtn.innerHTML = `Save User`;
         }
     }
 }
 
 function deleteUser(index) {
-    if (!isAdmin()) {
-        showToast('Access denied! Admin only.', 'error');
-        return;
-    }
-    
     const users = DataService.get('users') || [];
     const user = users[index];
+    if (!user) return;
     
-    // Prevent deleting the last admin
-    const adminCount = users.filter(u => u.role === 'Admin').length;
-    if (user.role === 'Admin' && adminCount <= 1) {
-        showToast('Cannot delete the last admin user!', 'error');
-        return;
-    }
-    
-    if (!confirm(`Delete user "${user.username}"?`)) {
-        return;
-    }
+    if (!confirm(`Delete user "${user.username}"?`)) return;
     
     users.splice(index, 1);
     DataService.set('users', users);
     showToast('User deleted successfully!', 'success');
-    
     showUserModal();
+}
+
+function updateUserProfile() {
+    const nameEl = document.getElementById('user-name');
+    const roleEl = document.getElementById('user-role');
+    const user = window.currentUser || JSON.parse(localStorage.getItem('currentUser') || '{}');
+    
+    if (nameEl) nameEl.textContent = user.fullName || user.username || 'User';
+    if (roleEl) roleEl.textContent = user.role || 'User';
 }
 
 function renderUsers(container) {
@@ -8491,18 +8436,6 @@ function renderUsers(container) {
     `;
 }
 
-function updateUserProfile() {
-    const nameEl = document.getElementById('user-name');
-    const roleEl = document.getElementById('user-role');
-    
-    if (typeof currentUser !== 'undefined' && currentUser) {
-        if (nameEl) nameEl.textContent = currentUser.fullName || currentUser.name || currentUser.username || 'User';
-        if (roleEl) roleEl.textContent = currentUser.role || 'User';
-    } else {
-        if (nameEl) nameEl.textContent = 'Guest';
-        if (roleEl) roleEl.textContent = 'Not logged in';
-    }
-}
 
 // ============================================
 // RESULTS PORTAL ADMIN CONTROLS
@@ -9936,25 +9869,14 @@ function renderLoginForm() {
 async function loginUser(event) {
     if (event) event.preventDefault();
 
-    // 1. Get Login Button & Show Spinner
-    const loginForm = document.getElementById('loginForm') || document.forms['loginForm'];
-    const loginBtn = document.getElementById('login-btn') || 
-                     (loginForm ? loginForm.querySelector('button[type="submit"]') : null) || 
-                     document.querySelector('button[type="submit"]');
-                     
-    const originalBtnHtml = loginBtn ? loginBtn.innerHTML : 'Login';
+    const loginBtn = document.getElementById('login-btn') || document.querySelector('button[type="submit"]');
+    const originalText = loginBtn ? loginBtn.innerHTML : 'Login';
 
     if (loginBtn) {
         loginBtn.disabled = true;
+        loginBtn.dataset.originalText = originalText;
         loginBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i> Authenticating...`;
     }
-
-    const resetBtn = () => {
-        if (loginBtn) {
-            loginBtn.disabled = false;
-            loginBtn.innerHTML = originalBtnHtml;
-        }
-    };
 
     try {
         const identifierInput = (
@@ -9969,11 +9891,10 @@ async function loginUser(event) {
 
         if (!identifierInput || !passwordInput) {
             showToast('Please enter both username/email and password.', 'error');
-            resetBtn();
+            hideLoadingSpinner();
             return;
         }
 
-        // 2. Resolve User Profile from Local Database
         const users = DataService.get('users') || [];
         const matchedUser = users.find(u => 
             (u.username && u.username.toLowerCase() === identifierInput.toLowerCase()) || 
@@ -9989,7 +9910,7 @@ async function loginUser(event) {
 
         let authenticatedUser = null;
 
-        // 3. Attempt Firebase Authentication
+        // Firebase Login Attempt
         try {
             let userCredential = null;
             if (window.firebaseAuth && window.signInWithEmailAndPassword) {
@@ -10007,48 +9928,31 @@ async function loginUser(event) {
                 };
             }
         } catch (fbErr) {
-            console.warn("Firebase authentication bypassed; falling back to local verification.");
+            console.warn("Firebase Auth bypassed; verifying via local database.");
         }
 
-        // 4. Local Database Verification Fallback
+        // Fallback Local Database Verification
         if (!authenticatedUser && matchedUser && matchedUser.password === passwordInput) {
             authenticatedUser = matchedUser;
         }
-        
-        // Inside loginUser() -- Handle Successful Authentication Block:
+
         if (authenticatedUser) {
             window.currentUser = authenticatedUser;
-            currentUser = authenticatedUser;
             localStorage.setItem('currentUser', JSON.stringify(authenticatedUser));
 
             showToast('Logged in successfully!', 'success');
-
-            // Instantly transition view from Login to App Layout
             initApp();
-
-            // Resolve role target page
-            const targetPage = getDashboardForRole();
-
-            // Navigate without refreshing
-            if (typeof navigateTo === 'function') {
-                navigateTo(targetPage);
-            } else if (typeof Router !== 'undefined' && Router.navigate) {
-                Router.navigate(targetPage);
-            }
-
-            // Sync navigation highlight and page content
-            refreshApp();
+            navigateTo(getDashboardForRole());
             return;
         }
 
-        // 6. Handle Invalid Credentials
         showToast('Invalid username/email or password.', 'error');
-        resetBtn();
+        hideLoadingSpinner();
 
     } catch (err) {
-        console.error("Login process error:", err);
-        showToast('Invalid username or password.', 'error');
-        hideLoadingSpinner(); 
+        console.error("Login error:", err);
+        showToast('Authentication failed. Please try again.', 'error');
+        hideLoadingSpinner();
     }
 }
 
