@@ -650,34 +650,215 @@ function getDashboardForRole() {
     if (role === 'Accountant') return 'accountant-dashboard';
     return 'dashboard';
 }
-
-function renderTeacherDashboard(container) {
-    const students = DataService.get('students');
-    const classes = DataService.get('classes') || [];
-    const myClass = classes.find(c => c.classTeacher === currentUser?.name) || {};
+async function renderTeacherDashboard(container) {
+    if (!container) return;
     
+    // Show loading spinner
     container.innerHTML = `
-        <div class="max-w-7xl mx-auto">
-            <div class="bg-white rounded-2xl shadow p-6">
-                <h3 class="text-2xl font-semibold text-gray-800">👨‍🏫 Teacher Dashboard</h3>
-                <p class="text-gray-500">Welcome, ${currentUser?.name || 'Teacher'}</p>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-                    <div class="bg-indigo-50 rounded-xl p-6 text-center">
-                        <p class="text-3xl font-bold text-indigo-600">${students.filter(s => s.class === myClass.name).length}</p>
-                        <p class="text-sm text-gray-500">Students in ${myClass.name || 'Your Class'}</p>
-                    </div>
-                    <div class="bg-green-50 rounded-xl p-6 text-center">
-                        <p class="text-3xl font-bold text-green-600">${students.length}</p>
-                        <p class="text-sm text-gray-500">Total Students</p>
-                    </div>
-                    <div class="bg-amber-50 rounded-xl p-6 text-center">
-                        <p class="text-3xl font-bold text-amber-600">${classes.length}</p>
-                        <p class="text-sm text-gray-500">Classes</p>
-                    </div>
-                </div>
-            </div>
+        <div class="p-8 text-center text-gray-500">
+            <i class="fas fa-spinner fa-spin text-2xl mr-2 text-indigo-600"></i>
+            <span>Loading dashboard...</span>
         </div>
     `;
+
+    try {
+        // Fetch students & classes data asynchronously
+        const students = (await DataService.getStudents()) || [];
+        const classes = (await DataService.getClasses()) || [];
+        
+        // Match teacher to their assigned class
+        const teacherName = currentUser?.name || currentUser?.username || 'Teacher';
+        const myClass = classes.find(c => c.classTeacher === teacherName || c.teacher === teacherName) || {};
+        const myClassName = myClass.name || 'Unassigned';
+        
+        // Filter students in teacher's assigned class
+        const myStudents = students.filter(s => s.class === myClassName && s.status !== 'Left');
+        const activeTotal = students.filter(s => s.status !== 'Left').length;
+
+        const todayStr = new Date().toLocaleDateString('en-US', { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+        });
+
+        container.innerHTML = `
+            <div class="max-w-7xl mx-auto space-y-6">
+                <!-- Welcome Banner -->
+                <div class="bg-gradient-to-r from-indigo-600 to-indigo-800 rounded-2xl p-6 text-white shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                        <span class="bg-indigo-500/30 text-indigo-100 text-xs font-semibold px-3 py-1 rounded-full border border-indigo-400/30">
+                            <i class="fas fa-chalkboard-teacher mr-1"></i> Teacher Portal
+                        </span>
+                        <h2 class="text-2xl sm:text-3xl font-bold mt-2">Welcome, ${escapeHtml(teacherName)}! 👋</h2>
+                        <p class="text-indigo-200 text-sm mt-1">
+                            ${myClassName !== 'Unassigned' 
+                                ? `Assigned Class: <span class="font-semibold text-white bg-indigo-900/50 px-2 py-0.5 rounded border border-indigo-400/30">${escapeHtml(myClassName)}</span>` 
+                                : '<span class="text-amber-200">No class assigned yet. Please contact the administrator.</span>'}
+                        </p>
+                    </div>
+                    <div class="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-xl border border-white/15 text-left md:text-right">
+                        <div class="text-xs text-indigo-200 uppercase tracking-wider">Today's Date</div>
+                        <div class="text-sm font-semibold text-white mt-0.5"><i class="far fa-calendar-alt mr-1.5"></i>${todayStr}</div>
+                    </div>
+                </div>
+
+                <!-- KPI Metric Cards -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                    <div class="bg-white rounded-2xl shadow-sm p-5 border border-gray-100 hover:shadow-md transition">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-xs font-semibold uppercase text-gray-400 tracking-wider">My Class Roster</p>
+                                <p class="text-3xl font-bold text-gray-800 mt-1">${myStudents.length}</p>
+                                <p class="text-xs text-gray-500 mt-1">Students in ${escapeHtml(myClassName)}</p>
+                            </div>
+                            <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center text-xl font-bold">
+                                <i class="fas fa-user-graduate"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-2xl shadow-sm p-5 border border-gray-100 hover:shadow-md transition">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-xs font-semibold uppercase text-gray-400 tracking-wider">Attendance</p>
+                                <p class="text-lg font-bold text-emerald-600 mt-1">Daily Register</p>
+                                <p class="text-xs text-gray-500 mt-1">Track presence & absent status</p>
+                            </div>
+                            <div class="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center text-xl">
+                                <i class="fas fa-calendar-check"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-2xl shadow-sm p-5 border border-gray-100 hover:shadow-md transition sm:col-span-2 lg:col-span-1">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-xs font-semibold uppercase text-gray-400 tracking-wider">Assessment</p>
+                                <p class="text-lg font-bold text-purple-600 mt-1">Continuous Assessment</p>
+                                <p class="text-xs text-gray-500 mt-1">Enter marks & term grades</p>
+                            </div>
+                            <div class="w-12 h-12 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center text-xl">
+                                <i class="fas fa-graduation-cap"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Core Class Management Actions -->
+                <div class="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-bolt text-amber-500"></i> Class Management Quick Tasks
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <!-- Mark Attendance Button -->
+                        <button onclick="Router.navigate('attendance')" 
+                                class="flex items-center gap-4 p-4 rounded-xl border border-gray-200 hover:border-emerald-500 hover:bg-emerald-50/50 transition group text-left w-full">
+                            <div class="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-xl shrink-0 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-clipboard-user"></i>
+                            </div>
+                            <div>
+                                <div class="font-semibold text-gray-800 group-hover:text-emerald-700">Mark Attendance</div>
+                                <div class="text-xs text-gray-500">Record daily register for ${escapeHtml(myClassName)}</div>
+                            </div>
+                        </button>
+
+                        <!-- Continuous Assessment Button -->
+                        <button onclick="Router.navigate('grades')" 
+                                class="flex items-center gap-4 p-4 rounded-xl border border-gray-200 hover:border-purple-500 hover:bg-purple-50/50 transition group text-left w-full">
+                            <div class="w-12 h-12 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center text-xl shrink-0 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-file-pen"></i>
+                            </div>
+                            <div>
+                                <div class="font-semibold text-gray-800 group-hover:text-purple-700">Continuous Assessment</div>
+                                <div class="text-xs text-gray-500">Record coursework & examination grades</div>
+                            </div>
+                        </button>
+
+                        <!-- View Class Register Button -->
+                        <button onclick="Router.navigate('student-registry')" 
+                                class="flex items-center gap-4 p-4 rounded-xl border border-gray-200 hover:border-indigo-500 hover:bg-indigo-50/50 transition group text-left w-full">
+                            <div class="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-xl shrink-0 group-hover:scale-110 transition-transform">
+                                <i class="fas fa-address-book"></i>
+                            </div>
+                            <div>
+                                <div class="font-semibold text-gray-800 group-hover:text-indigo-700">Student Register</div>
+                                <div class="text-xs text-gray-500">View student profiles & parent contacts</div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Assigned Class Roster Table -->
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div class="p-5 border-b flex flex-wrap gap-2 justify-between items-center bg-gray-50/50">
+                        <div>
+                            <h3 class="font-bold text-gray-800 text-lg">My Class Roster (${escapeHtml(myClassName)})</h3>
+                            <p class="text-xs text-gray-500">Enrolled active students assigned to your class</p>
+                        </div>
+                        <button onclick="Router.navigate('student-registry')" class="text-sm text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1.5">
+                            Full Registry <i class="fas fa-arrow-right text-xs"></i>
+                        </button>
+                    </div>
+                    
+                    ${myStudents.length === 0 ? `
+                        <div class="p-8 text-center text-gray-500">
+                            <i class="fas fa-user-slash text-3xl mb-2 text-gray-300"></i>
+                            <p>No active students assigned to ${escapeHtml(myClassName)}.</p>
+                        </div>
+                    ` : `
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase">
+                                        <th class="px-6 py-3">Student ID</th>
+                                        <th class="px-6 py-3">Full Name</th>
+                                        <th class="px-6 py-3">Class</th>
+                                        <th class="px-6 py-3">Parent Phone</th>
+                                        <th class="px-6 py-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100">
+                                    ${myStudents.slice(0, 10).map(student => `
+                                        <tr class="hover:bg-indigo-50/30 transition">
+                                            <td class="px-6 py-3.5 text-sm font-mono text-gray-600">${escapeHtml(student.id)}</td>
+                                            <td class="px-6 py-3.5 text-sm font-medium text-gray-800">${escapeHtml(student.name)}</td>
+                                            <td class="px-6 py-3.5 text-sm">
+                                                <span class="px-2.5 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-semibold">
+                                                    ${escapeHtml(student.class)}
+                                                </span>
+                                            </td>
+                                            <td class="px-6 py-3.5 text-sm font-mono text-gray-600">
+                                                ${student.parentPhone ? escapeHtml(typeof formatPhoneForDisplay === 'function' ? formatPhoneForDisplay(student.parentPhone) : student.parentPhone) : 'N/A'}
+                                            </td>
+                                            <td class="px-6 py-3.5 text-sm text-right space-x-1">
+                                                <button onclick="Router.navigate('grades')" class="text-xs bg-purple-50 text-purple-700 hover:bg-purple-100 px-3 py-1.5 rounded-lg font-medium transition" title="Enter Marks">
+                                                    <i class="fas fa-pen mr-1"></i> Grade
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        ${myStudents.length > 10 ? `
+                            <div class="p-3 text-center border-t bg-gray-50 text-xs text-gray-500">
+                                Showing top 10 of ${myStudents.length} class members. 
+                                <a href="#" onclick="Router.navigate('student-registry'); return false;" class="text-indigo-600 font-semibold underline">View all in Registry</a>
+                            </div>
+                        ` : ''}
+                    `}
+                </div>
+            </div>
+        `;
+    } catch (err) {
+        console.error("Error rendering teacher dashboard:", err);
+        container.innerHTML = `
+            <div class="p-6 text-red-600 bg-red-50 rounded-xl border border-red-200">
+                <i class="fas fa-exclamation-circle mr-2"></i> Failed to load dashboard data. Please try again.
+            </div>
+        `;
+    }
 }
 
 // ============================================
