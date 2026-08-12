@@ -42,32 +42,27 @@ body {
 }
 
 /* ====================== SIDEBAR COLLAPSE ====================== */
-#sidebar{
+#sidebar {
+    width: 260px;
+    min-width: 260px;
+    max-width: 260px;
+    flex: 0 0 260px;
+    overflow: hidden;
 
-    width:260px;
-    min-width:260px;
-    max-width:260px;
-
-    flex:0 0 260px;
-
-    overflow:hidden;
-
-    transition:
-        width .3s,
-        min-width .3s,
-        max-width .3s,
-        flex-basis .3s;
-
+    /* Added 'left .3s' so mobile drawer slides smoothly */
+    transition: 
+        left .3s ease-in-out,
+        width .3s ease-in-out,
+        min-width .3s ease-in-out,
+        max-width .3s ease-in-out,
+        flex-basis .3s ease-in-out;
 }
 
-#sidebar.collapsed{
-
-    width:72px;
-    min-width:72px;
-    max-width:72px;
-
-    flex:0 0 72px;
-
+#sidebar.collapsed {
+    width: 72px;
+    min-width: 72px;
+    max-width: 72px;
+    flex: 0 0 72px;
 }
 
 /* Hide text when collapsed */
@@ -118,6 +113,30 @@ transition:.25s;
     transition: all 0.3s ease;
 }
 
+/* ====================== SIDEBAR COLLAPSE ====================== */
+#sidebar {
+    width: 260px;
+    min-width: 260px;
+    max-width: 260px;
+    flex: 0 0 260px;
+    overflow: hidden;
+
+    /* Added 'left .3s' so mobile drawer slides smoothly */
+    transition: 
+        left .3s ease-in-out,
+        width .3s ease-in-out,
+        min-width .3s ease-in-out,
+        max-width .3s ease-in-out,
+        flex-basis .3s ease-in-out;
+}
+
+#sidebar.collapsed {
+    width: 72px;
+    min-width: 72px;
+    max-width: 72px;
+    flex: 0 0 72px;
+}
+
 /* ====================== MOBILE ====================== */
 @media (max-width: 1024px) {
     #sidebar {
@@ -130,6 +149,11 @@ transition:.25s;
     
     #sidebar.mobile-open {
         left: 0 !important;
+    }
+
+    /* Hide desktop collapse arrow on mobile viewports */
+    #sidebar-collapse {
+        display: none !important;
     }
 }
 

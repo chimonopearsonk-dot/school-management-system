@@ -493,25 +493,6 @@ function setupNavigation() {
 
 
 }
-function navigateTo(moduleId) {
-    const targetModule = APP_MODULES.find(m => m.id === moduleId);
-    if (!targetModule) return;
-
-    activeModuleId = moduleId;
-
-    // Update URL hash without causing page reload
-    if (window.location.hash !== `#${moduleId}`) {
-        window.location.hash = moduleId;
-    }
-
-    renderSidebar();
-
-    const mainContainer = document.getElementById('main-content');
-    if (mainContainer && typeof targetModule.render === 'function') {
-        mainContainer.innerHTML = '';
-        targetModule.render(mainContainer);
-    }
-}
 
 // ============================================
 // SCHOOL SETTINGS
@@ -9194,78 +9175,6 @@ function handleAdminProcessRequest(requestId, action) {
 }
 
 // ============================================
-// SIDEBAR COLLAPSE FUNCTIONALITY
-// ============================================
-
-let isSidebarCollapsed = false;
-
-function toggleSidebar() {
-    const sidebar = document.getElementById('sidebar');
-    const collapseIcon = document.getElementById('collapse-icon');
-    const schoolName = document.getElementById('school-name');
-    const schoolTagline = document.getElementById('school-tagline');
-    const userInfo = document.getElementById('user-info');
-    const navLabels = document.querySelectorAll('.nav-label');
-
-    isSidebarCollapsed = !isSidebarCollapsed;
-
-    if (isSidebarCollapsed) {
-        // Collapse sidebar width
-        sidebar.classList.remove('w-64');
-        sidebar.classList.add('w-20');
-
-        // Hide text elements
-        if (schoolName) schoolName.classList.add('hidden');
-        if (schoolTagline) schoolTagline.classList.add('hidden');
-        if (userInfo) userInfo.classList.add('hidden');
-        navLabels.forEach(label => label.classList.add('hidden'));
-
-        // Flip arrow icon
-        if (collapseIcon) {
-            collapseIcon.classList.remove('fa-chevron-left');
-            collapseIcon.classList.add('fa-chevron-right');
-        }
-    } else {
-        // Expand sidebar width
-        sidebar.classList.remove('w-20');
-        sidebar.classList.add('w-64');
-
-        // Show text elements
-        if (schoolName) schoolName.classList.remove('hidden');
-        if (schoolTagline) schoolTagline.classList.remove('hidden');
-        if (userInfo) userInfo.classList.remove('hidden');
-        navLabels.forEach(label => label.classList.remove('hidden'));
-
-        // Reset arrow icon
-        if (collapseIcon) {
-            collapseIcon.classList.remove('fa-chevron-right');
-            collapseIcon.classList.add('fa-chevron-left');
-        }
-    }
-}
-
-function renderSidebar() {
-    const navContainer = document.getElementById('main-nav');
-    if (!navContainer) return;
-
-    navContainer.innerHTML = APP_MODULES.map(module => {
-        const isActive = module.id === activeModuleId;
-        const activeStyles = isActive 
-            ? 'bg-indigo-700 text-white font-medium shadow' 
-            : 'text-indigo-200 hover:bg-indigo-700 hover:text-white';
-
-        return `
-            <a href="#${module.id}" onclick="navigateTo('${module.id}'); return false;" 
-               class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 mb-1 ${activeStyles}">
-                <i class="${module.icon} w-5 text-center text-lg"></i>
-                <span class="text-sm nav-label ${isSidebarCollapsed ? 'hidden' : ''}">${module.label}</span>
-            </a>
-        `;
-    }).join('');
-}
-
-
-// ============================================
 // PLACEHOLDER PAGES
 // ============================================
 
@@ -9360,7 +9269,7 @@ function seedData() {
 }
 
 // ============================================
-// FUNCTIONAL SIDEBAR COLLAPSE
+// 1. SIDEBAR TOGGLE & BROWSER STATE
 // ============================================
 function setupSidebar() {
     const sidebar = document.getElementById("sidebar");
@@ -9376,28 +9285,27 @@ function setupSidebar() {
         toggleBtn.addEventListener("click", function() {
             sidebar.classList.toggle("collapsed");
             
-            // Update icon
+            // Update collapse arrow icon
             const icon = document.getElementById("collapse-icon");
             if (icon) {
-                if (sidebar.classList.contains("collapsed")) {
-                    icon.className = "fas fa-chevron-right text-xs";
-                } else {
-                    icon.className = "fas fa-chevron-left text-xs";
-                }
+                icon.className = sidebar.classList.contains("collapsed") 
+                    ? "fas fa-chevron-right text-xs" 
+                    : "fas fa-chevron-left text-xs";
             }
             
+            // Save state in browser memory
             localStorage.setItem("sidebarCollapsed", sidebar.classList.contains("collapsed"));
         });
     }
 
-    // Mobile toggle
+    // Mobile menu toggle
     if (mobileBtn) {
         mobileBtn.addEventListener("click", function() {
             sidebar.classList.toggle("mobile-open");
         });
     }
 
-    // Restore desktop state
+    // Restore saved state when reloading on desktop
     if (desktop.matches) {
         if (localStorage.getItem("sidebarCollapsed") === "true") {
             sidebar.classList.add("collapsed");
@@ -9408,7 +9316,7 @@ function setupSidebar() {
         }
     }
 
-    // Close mobile sidebar when clicking outside
+    // Close mobile sidebar on outside click
     document.addEventListener("click", function(e) {
         if (window.innerWidth < 1024) {
             const isSidebar = sidebar.contains(e.target);
@@ -9419,13 +9327,76 @@ function setupSidebar() {
         }
     });
 
-    // Handle resize
+    // Handle screen resize
     window.addEventListener("resize", function() {
         if (window.innerWidth >= 1024) {
             sidebar.classList.remove("mobile-open");
         }
     });
 }
+
+// ============================================
+// 2. CLOUD/STATIC ROUTING (HASH-BASED)
+// ============================================
+let activeModuleId = 'dashboard';
+
+function renderSidebar() {
+    const navContainer = document.getElementById('main-nav');
+    if (!navContainer) return;
+
+    navContainer.innerHTML = APP_MODULES.map(module => {
+        const isActive = module.id === activeModuleId;
+        const activeStyles = isActive 
+            ? 'bg-indigo-700 text-white font-medium shadow' 
+            : 'text-indigo-200 hover:bg-indigo-700 hover:text-white';
+
+        return `
+            <a href="#${module.id}" 
+               class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 mb-1 ${activeStyles}">
+                <i class="${module.icon} w-5 text-center text-lg flex-shrink-0"></i>
+                <span class="text-sm nav-label">${module.label}</span>
+            </a>
+        `;
+    }).join('');
+}
+
+function navigateTo(moduleId) {
+    const targetModule = APP_MODULES.find(m => m.id === moduleId);
+    if (!targetModule) return;
+
+    activeModuleId = moduleId;
+
+    // Keep Hash URL synced for refresh support on hosted environments
+    if (window.location.hash !== `#${moduleId}`) {
+        window.location.hash = moduleId;
+    }
+
+    renderSidebar();
+
+    const mainContainer = document.getElementById('main-content');
+    if (mainContainer && typeof targetModule.render === 'function') {
+        mainContainer.innerHTML = '';
+        targetModule.render(mainContainer);
+    }
+}
+
+function handleInitialRoute() {
+    const hash = window.location.hash.replace('#', '');
+    const validModule = APP_MODULES.find(m => m.id === hash);
+    const initialModule = validModule ? validModule.id : 'dashboard';
+    
+    navigateTo(initialModule);
+}
+
+// ============================================
+// 3. EVENT LISTENERS SETUP
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+    setupSidebar();
+    handleInitialRoute();
+});
+
+window.addEventListener('hashchange', handleInitialRoute);
 
 // ============================================
 // COMPLETE APP INITIALIZATION & AUTH SYSTEM
