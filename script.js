@@ -576,18 +576,6 @@ if (typeof window.standardizeClassName === 'undefined') {
     window.standardizeClassName = (cls) => String(cls || '').toUpperCase().trim();
 }
 
-if (typeof window.escapeHtml === 'undefined') {
-    window.escapeHtml = (str) => {
-        if (!str) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
-    };
-}
-
 if (typeof window.formatDate === 'undefined') {
     window.formatDate = (dateStr) => dateStr ? new Date(dateStr).toLocaleDateString() : 'N/A';
 }
@@ -595,49 +583,6 @@ if (typeof window.formatDate === 'undefined') {
 if (typeof window.formatPhoneForDisplay === 'undefined') {
     window.formatPhoneForDisplay = (phone) => phone ? String(phone).trim() : 'N/A';
 }
-
-const DataService = {
-    // Generate standard student ID (e.g. BAGSS/2026/001 or fallback timestamp)
-    generateId(prefix = 'BAGSS', year = new Date().getFullYear()) {
-        const timestamp = Date.now().toString().slice(-4);
-        const randomDigits = Math.floor(100 + Math.random() * 900);
-        return `${prefix}/${year}/${timestamp}${randomDigits}`;
-    },
-
-    // Legacy helper
-    get(key) {
-        try {
-            const data = localStorage.getItem(key);
-            return data ? JSON.parse(data) : [];
-        } catch (e) {
-            console.warn(`DataService.get error for key "${key}":`, e);
-            return [];
-        }
-    },
-
-    // Save to localStorage
-    set(key, data) {
-        try {
-            localStorage.setItem(key, JSON.stringify(data));
-        } catch (e) {
-            console.error("DataService.set error:", e);
-        }
-    },
-
-    // Cloud Firestore Async Fetch
-    async getStudents() {
-        try {
-            if (typeof db !== 'undefined' && db) {
-                const snapshot = await db.collection('students').get();
-                return snapshot.docs.map(doc => ({ firebaseDocId: doc.id, ...doc.data() }));
-            }
-            return this.get('students');
-        } catch (error) {
-            console.error("Error fetching students from cloud, falling back to local:", error);
-            return this.get('students');
-        }
-    }
-};
 
 const DataAccess = {
     // Batch insert students into Cloud Firestore during Bulk Upload
