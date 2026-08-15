@@ -9287,6 +9287,32 @@ function getSecureData(key) {
     }
 }
 
+// ============================================
+// SCHOOL SETTINGS MODULE
+// ============================================
+
+// Helper Safety Fallbacks
+const safeEscapeHtml = (str) => {
+    if (typeof escapeHtml === 'function') return escapeHtml(str);
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+};
+
+const safeFormatDate = (dateStr) => {
+    if (typeof formatDate === 'function') return formatDate(dateStr);
+    if (!dateStr) return 'Not set';
+    try {
+        return new Date(dateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    } catch (e) {
+        return dateStr;
+    }
+};
+
 /**
  * Main Render Function linked to 'settings' navigation route
  */
