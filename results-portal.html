@@ -51,14 +51,11 @@
     <!-- Header -->
     <header class="bg-indigo-800 text-white shadow-lg no-print">
         <div class="max-w-4xl mx-auto px-4 py-4">
-            <div class="flex justify-between items-center">
+            <div class="w-12 h-12 bg-indigo-700/60 rounded-full flex items-center justify-center text-2xl mb-1"></div>
                 <div>
-                    <h1 class="text-2xl font-bold">📄 Results Portal</h1>
+                    <h1 class="text-2xl font-bold">Results Portal</h1>
                     <p class="text-sm text-indigo-300">Bandawe Girls Secondary School</p>
                 </div>
-                <a href="index.html" class="bg-indigo-700 hover:bg-indigo-600 px-4 py-2 rounded-lg text-sm transition">
-                    <i class="fas fa-home"></i> School Website
-                </a>
             </div>
         </div>
     </header>
@@ -131,26 +128,100 @@
     <div id="toast-container" class="toast-container"></div>
 
     <script>
-        function formatDate(dateString) {
-            if (!dateString) return 'N/A';
-            try {
-                var date = new Date(dateString);
-                if (isNaN(date.getTime())) return dateString;
-                var day = String(date.getDate()).padStart(2, '0');
-                var month = String(date.getMonth() + 1).padStart(2, '0');
-                var year = date.getFullYear();
-                return day + '/' + month + '/' + year;
-            } catch (e) {
-                return dateString;
-            }
-        }
+        // Utility: Date Formatter (DD/MM/YYYY)
+function formatDate(dateString) {
+    if (!dateString) return 'N/A';
+    try {
+        var date = new Date(dateString);
+        if (isNaN(date.getTime())) return dateString;
+        
+        var day = String(date.getDate()).padStart(2, '0');
+        var month = String(date.getMonth() + 1).padStart(2, '0');
+        var year = date.getFullYear();
+        
+        return day + '/' + month + '/' + year;
+    } catch (e) {
+        return dateString;
+    }
+}
 
-        function escapeHtml(text) {
-            if (!text) return '';
-            var div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+// Utility: HTML Escaper
+function escapeHtml(text) {
+    if (!text) return '';
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+ // Load and display portal status
+function loadPortalStatus() {
+    try {
+        var rawSettings = localStorage.getItem('portalSettings');
+        var settings = rawSettings ? JSON.parse(rawSettings) : {
+            isOpen: false,
+            openingDate: null,
+            closingDate: null,
+            message: 'Results will be available soon.'
+        };
+
+        var statusDiv = document.getElementById('portal-status');
+        var accessForm = document.getElementById('access-form');
+
+        if (!statusDiv) return;
+
+        if (settings.isOpen) {
+            var closingInfo = settings.closingDate 
+                ? '<p class="text-xs mt-1 text-gray-500">Portal closes: ' + formatDate(settings.closingDate) + '</p>' 
+                : '';
+
+            statusDiv.innerHTML = 
+                '<div class="bg-green-50 border border-green-200 rounded-xl p-4 text-green-700 shadow-sm">' +
+                    '<p class="font-semibold text-base">✅ Results Portal is OPEN</p>' +
+                    '<p class="text-sm mt-1">' + (escapeHtml(settings.message) || 'Enter your details to view your results.') + '</p>' +
+                    closingInfo +
+                '</div>';
+
+            if (accessForm) accessForm.style.display = 'block';
+        } else {
+            var openingInfo = settings.openingDate 
+                ? '<p class="text-xs mt-1 text-gray-500">Portal opens: ' + formatDate(settings.openingDate) + '</p>' 
+                : '';
+
+            statusDiv.innerHTML = 
+                '<div class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 shadow-sm">' +
+                    '<p class="font-semibold text-base">🔒 Results Portal is CLOSED</p>' +
+                    '<p class="text-sm mt-1">' + (escapeHtml(settings.message) || 'Results are not available at this time.') + '</p>' +
+                    openingInfo +
+                '</div>';
+
+            if (accessForm) accessForm.style.display = 'none';
         }
+    } catch (e) {
+        console.error('Error loading portal status:', e);
+    }
+}
+
+// Initialize and setup live-sync triggers
+document.addEventListener('DOMContentLoaded', function() {
+    loadPortalStatus();
+
+    var loginForm = document.getElementById('portalLoginForm');
+    if (loginForm) {
+        loginForm.addEventListener('submit', portalLogin);
+    }
+
+    // Auto-refresh status if changed in another window/tab
+    window.addEventListener('storage', function(e) {
+        if (e.key === 'portalSettings') {
+            loadPortalStatus();
+        }
+    });
+
+    // Check every 5 seconds for background changes
+    setInterval(loadPortalStatus, 5000);
+});
 
         function showToast(message, type) {
             if (!type) type = 'info';
@@ -170,40 +241,6 @@
             if (modal) {
                 modal.classList.add('hidden');
                 modal.style.display = 'none';
-            }
-        }
-
-        function loadPortalStatus() {
-            try {
-                var settings = JSON.parse(localStorage.getItem('portalSettings')) || {
-                    isOpen: false,
-                    openingDate: null,
-                    closingDate: null,
-                    message: 'Results will be available soon.'
-                };
-                
-                var statusDiv = document.getElementById('portal-status');
-                var accessForm = document.getElementById('access-form');
-                
-                if (settings.isOpen) {
-                    var closingInfo = settings.closingDate ? '<p class="text-xs mt-1 text-gray-500">Portal closes: ' + formatDate(settings.closingDate) + '</p>' : '';
-                    statusDiv.innerHTML = '<div class="bg-green-50 border border-green-200 rounded-xl p-4 text-green-700">' +
-                        '<p class="font-semibold">✅ Results Portal is OPEN</p>' +
-                        '<p class="text-sm">' + (escapeHtml(settings.message) || 'Enter your details to view your results.') + '</p>' +
-                        closingInfo +
-                        '</div>';
-                    if (accessForm) accessForm.style.display = 'block';
-                } else {
-                    var openingInfo = settings.openingDate ? '<p class="text-xs mt-1 text-gray-500">Portal opens: ' + formatDate(settings.openingDate) + '</p>' : '';
-                    statusDiv.innerHTML = '<div class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700">' +
-                        '<p class="font-semibold">🔒 Results Portal is CLOSED</p>' +
-                        '<p class="text-sm">' + (escapeHtml(settings.message) || 'Results are not available at this time.') + '</p>' +
-                        openingInfo +
-                        '</div>';
-                    if (accessForm) accessForm.style.display = 'none';
-                }
-            } catch (e) {
-                console.error('Error loading portal status:', e);
             }
         }
 
@@ -544,15 +581,6 @@ function handleParentPhoneSubmit(e) {
 
             if (form) form.scrollIntoView({ behavior: 'smooth' });
         }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            loadPortalStatus();
-            
-            var loginForm = document.getElementById('portalLoginForm');
-            if (loginForm) {
-                loginForm.addEventListener('submit', portalLogin);
-            }
-        });
     </script>
 </body>
 </html>

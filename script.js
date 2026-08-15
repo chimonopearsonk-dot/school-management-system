@@ -8743,45 +8743,47 @@ function renderUsers(container) {
     `;
 }
 
-
 // ============================================
 // RESULTS PORTAL ADMIN CONTROLS
 // ============================================
 
 function showPortalSettings() {
-    console.log('showPortalSettings called'); // Debug
+    console.log('showPortalSettings called');
 
     if (!isAdmin()) {
         showToast('Access denied! Admin only.', 'error');
         return;
     }
     
-    const settings = DataService.get('portalSettings') || {
-        isOpen: false,
-        openingDate: null,
-        closingDate: null,
-        message: 'Results will be available soon.'
-    };
+    let settings = DataService.get('portalSettings');
+    if (!settings || Array.isArray(settings) || Object.keys(settings).length === 0) {
+        settings = {
+            isOpen: false,
+            openingDate: null,
+            closingDate: null,
+            message: 'Results will be available soon.'
+        };
+    }
     
     const modal = document.getElementById('modal');
     const modalContent = document.getElementById('modal-content');
     
+    if (!modal || !modalContent) return;
+
     modal.classList.remove('hidden');
     modal.style.display = 'flex';
-    modalContent.innerHTML = '';
-    
     modalContent.innerHTML = `
         <div class="flex justify-between items-center mb-6">
-            <h3 class="text-xl font-semibold">Results Portal Settings</h3>
-            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
-                <i class="fas fa-times"></i>
+            <h3 class="text-xl font-semibold text-gray-800">Results Portal Settings</h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 transition">
+                <i class="fas fa-times text-lg"></i>
             </button>
         </div>
         
         <form id="portalSettingsForm">
             <div class="space-y-4">
                 <!-- Portal Status -->
-                <div class="flex items-center gap-4 p-4 rounded-lg ${settings.isOpen ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}">
+                <div class="flex items-center gap-4 p-4 rounded-xl ${settings.isOpen ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}">
                     <div class="flex-1">
                         <p class="font-semibold ${settings.isOpen ? 'text-green-700' : 'text-red-700'}">
                             Portal is ${settings.isOpen ? '🔓 OPEN' : '🔒 CLOSED'}
@@ -8789,83 +8791,60 @@ function showPortalSettings() {
                         <p class="text-xs text-gray-500">${settings.isOpen ? 'Parents can view and download results' : 'Parents cannot access results'}</p>
                     </div>
                     <button type="button" onclick="togglePortal()" 
-                            class="px-4 py-2 rounded-lg ${settings.isOpen ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} text-white transition text-sm">
+                            class="px-4 py-2 rounded-xl ${settings.isOpen ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} text-white transition text-sm font-medium shadow-sm">
                         ${settings.isOpen ? 'Close Portal' : 'Open Portal'}
                     </button>
                 </div>
                 
                 <!-- Opening Date -->
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Opening Date</label>
+                    <label class="block text-xs font-semibold text-gray-600 uppercase mb-1">Opening Date</label>
                     <input type="date" id="portal-opening-date" 
                            value="${settings.openingDate || ''}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
+                           class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
                 </div>
                 
                 <!-- Closing Date -->
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Closing Date</label>
+                    <label class="block text-xs font-semibold text-gray-600 uppercase mb-1">Closing Date</label>
                     <input type="date" id="portal-closing-date" 
                            value="${settings.closingDate || ''}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
+                           class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
                 </div>
                 
                 <!-- Portal Message -->
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Portal Message</label>
+                    <label class="block text-xs font-semibold text-gray-600 uppercase mb-1">Portal Message</label>
                     <textarea id="portal-message" rows="3" 
-                              class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500"
+                              class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                               placeholder="Message to display when portal is closed">${settings.message || 'Results will be available soon.'}</textarea>
-                </div>
-                
-                <!-- Current Status Summary -->
-                <div class="bg-gray-50 rounded-lg p-4">
-                    <p class="text-sm font-semibold text-gray-700">Portal Status Summary</p>
-                    <div class="grid grid-cols-2 gap-2 mt-2 text-sm">
-                        <div>
-                            <span class="text-gray-500">Status:</span>
-                            <span class="font-semibold ${settings.isOpen ? 'text-green-600' : 'text-red-600'}">${settings.isOpen ? 'OPEN' : 'CLOSED'}</span>
-                        </div>
-                        <div>
-                            <span class="text-gray-500">Opens:</span>
-                            <span class="font-semibold">${settings.openingDate ? formatDate(settings.openingDate) : 'Not set'}</span>
-                        </div>
-                        <div>
-                            <span class="text-gray-500">Closes:</span>
-                            <span class="font-semibold">${settings.closingDate ? formatDate(settings.closingDate) : 'Not set'}</span>
-                        </div>
-                        <div>
-                            <span class="text-gray-500">Message:</span>
-                            <span class="font-semibold text-xs">${settings.message ? 'Set' : 'Not set'}</span>
-                        </div>
-                    </div>
                 </div>
             </div>
             
             <div class="mt-6 flex gap-3">
                 <button type="button" onclick="closeModal()" 
-                        class="flex-1 py-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                        class="flex-1 py-3 text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition text-sm font-medium">
                     Close
                 </button>
                 <button type="submit" 
-                        class="flex-1 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+                        class="flex-1 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition text-sm font-medium shadow-sm flex items-center justify-center gap-2">
                     <i class="fas fa-save"></i> Save Settings
                 </button>
             </div>
         </form>
     `;
     
-    modal.querySelector('.bg-white').classList.add('max-w-xl');
+    const innerModal = modal.querySelector('.bg-white');
+    if (innerModal) innerModal.classList.add('max-w-xl');
     
     document.getElementById('portalSettingsForm').onsubmit = function(e) {
         e.preventDefault();
         savePortalSettings();
     };
 }
+
 function togglePortal() {
-    console.log('togglePortal called'); // Debug
-    
-    const settings = DataService.get('portalSettings') || {
+    let settings = DataService.get('portalSettings') || {
         isOpen: false,
         openingDate: null,
         closingDate: null,
@@ -8873,93 +8852,83 @@ function togglePortal() {
     };
     
     settings.isOpen = !settings.isOpen;
-    DataService.set('portalSettings', settings);
     
-    console.log('Portal toggled to:', settings.isOpen); // Debug
+    // Save to both DataService and raw localStorage for instant cross-file availability
+    DataService.set('portalSettings', settings);
+    localStorage.setItem('portalSettings', JSON.stringify(settings));
     
     showToast(`Portal ${settings.isOpen ? 'opened' : 'closed'} successfully!`, 'success');
     
-    // Close any open modal first
     closeModal();
     
-    // Refresh the portal page
-    const container = document.getElementById('content');
-    if (container) {
-        renderPortal(container);
-    }
+    // Refresh admin UI dynamically
+    refreshAdminPortalUI();
 }
 
 function savePortalSettings() {
-    console.log('savePortalSettings called'); // Debug
-    
-    const settings = DataService.get('portalSettings') || {
+    let settings = DataService.get('portalSettings') || {
         isOpen: false,
         openingDate: null,
         closingDate: null,
         message: 'Results will be available soon.'
     };
     
-    // Get values from form
-    const openingDate = document.getElementById('portal-opening-date').value;
-    const closingDate = document.getElementById('portal-closing-date').value;
-    const message = document.getElementById('portal-message').value.trim();
+    const openingDate = document.getElementById('portal-opening-date')?.value || null;
+    const closingDate = document.getElementById('portal-closing-date')?.value || null;
+    const message = document.getElementById('portal-message')?.value.trim() || 'Results will be available soon.';
     
-    console.log('Saving values:', { openingDate, closingDate, message }); // Debug
+    settings.openingDate = openingDate;
+    settings.closingDate = closingDate;
+    settings.message = message;
     
-    settings.openingDate = openingDate || null;
-    settings.closingDate = closingDate || null;
-    settings.message = message || 'Results will be available soon.';
-    
+    // Save to both DataService and raw localStorage
     DataService.set('portalSettings', settings);
-    
-    console.log('Settings saved:', DataService.get('portalSettings')); // Debug
+    localStorage.setItem('portalSettings', JSON.stringify(settings));
     
     showToast('Portal settings saved successfully!', 'success');
     
-    // Close modal
-    const modal = document.getElementById('modal');
-    modal.classList.add('hidden');
-    modal.style.display = 'none';
+    closeModal();
     
-    // Refresh the portal page
-    const container = document.getElementById('content');
+    // Refresh admin UI dynamically
+    refreshAdminPortalUI();
+}
+
+function refreshAdminPortalUI() {
+    const container = document.getElementById('main-content') || document.getElementById('content');
     if (container) {
         renderPortal(container);
     }
 }
 
 function getPortalLink() {
-    const baseUrl = window.location.origin + window.location.pathname.replace('index.html', '');
-    const portalUrl = baseUrl + 'results-portal.html';
+    const baseUrl = window.location.origin + window.location.pathname.replace(/index\.html$/, '');
+    const portalUrl = baseUrl + (baseUrl.endsWith('/') ? '' : '/') + 'results-portal.html';
     
-    // Copy to clipboard
     navigator.clipboard.writeText(portalUrl).then(() => {
         showToast('Portal link copied to clipboard!', 'success');
     }).catch(() => {
-        // Fallback
         prompt('Copy this link:', portalUrl);
     });
 }
 
 function renderPortal(container) {
-    console.log('renderPortal called');
-    
+    if (!container) container = document.getElementById('main-content') || document.getElementById('content');
+    if (!container) return;
+
     if (!isAdmin()) {
         container.innerHTML = `
-            <div class="bg-white rounded-2xl shadow p-8 text-center">
+            <div class="bg-white rounded-2xl shadow p-8 text-center max-w-2xl mx-auto mt-6">
                 <i class="fas fa-lock text-6xl text-red-400 mb-4"></i>
-                <h3 class="text-2xl font-semibold text-gray-600">Access Denied</h3>
-                <p class="text-gray-500 mt-2">You do not have permission to view this page.</p>
+                <h3 class="text-2xl font-semibold text-gray-700">Access Denied</h3>
+                <p class="text-gray-500 mt-2 text-sm">You do not have permission to view portal settings.</p>
             </div>
         `;
         return;
     }
     
-    // Get settings - handle empty array case
     let settings = DataService.get('portalSettings');
     
-    // If settings is empty array or not an object, set defaults
-    if (Array.isArray(settings) || Object.keys(settings).length === 0) {
+    if (!settings || Array.isArray(settings) || Object.keys(settings).length === 0) {
         settings = {
             isOpen: false,
             openingDate: null,
@@ -8967,70 +8936,73 @@ function renderPortal(container) {
             message: 'Results will be available soon.'
         };
         DataService.set('portalSettings', settings);
+        localStorage.setItem('portalSettings', JSON.stringify(settings));
     }
-    
-    console.log('Portal settings:', settings);
 
-    const baseUrl = window.location.origin + window.location.pathname.replace('index.html', '');
-    const portalUrl = baseUrl + 'results-portal.html';
+    const baseUrl = window.location.origin + window.location.pathname.replace(/index\.html$/, '');
+    const portalUrl = baseUrl + (baseUrl.endsWith('/') ? '' : '/') + 'results-portal.html';
     
-    // Format dates for display
     const openingDisplay = settings.openingDate ? formatDate(settings.openingDate) : 'Not set';
     const closingDisplay = settings.closingDate ? formatDate(settings.closingDate) : 'Not set';
     
     container.innerHTML = `
         <div class="max-w-4xl mx-auto">
-            <div class="bg-white rounded-2xl shadow p-6">
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                 <div class="flex justify-between items-center mb-6">
-                    <h3 class="text-2xl font-semibold text-gray-800">Results Portal Management</h3>
+                    <div>
+                        <h3 class="text-2xl font-bold text-gray-800">Results Portal Management</h3>
+                        <p class="text-xs text-gray-500 mt-1">Control public access and opening schedule for student report cards</p>
+                    </div>
                     <button onclick="showPortalSettings()" 
-                            class="bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 transition">
+                            class="bg-indigo-600 text-white px-5 py-2.5 rounded-xl hover:bg-indigo-700 flex items-center gap-2 transition text-sm font-medium shadow-sm">
                         <i class="fas fa-cog"></i> Settings
                     </button>
                 </div>
                 
                 <!-- Portal Status Card -->
-                <div class="rounded-xl p-6 mb-6 ${settings.isOpen ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}">
-                    <div class="flex items-center justify-between">
+                <div class="rounded-2xl p-6 mb-6 ${settings.isOpen ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}">
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                         <div>
-                            <p class="text-2xl font-bold ${settings.isOpen ? 'text-green-700' : 'text-red-700'}">
+                            <p class="text-xl font-bold ${settings.isOpen ? 'text-green-700' : 'text-red-700'}">
                                 ${settings.isOpen ? '🔓 Portal is OPEN' : '🔒 Portal is CLOSED'}
                             </p>
-                            <p class="text-sm text-gray-600 mt-1">${settings.isOpen ? 'Parents can access results' : 'Parents cannot access results at this time'}</p>
+                            <p class="text-xs sm:text-sm text-gray-600 mt-1">${settings.isOpen ? 'Parents can access and download report cards' : 'Parents cannot access results at this time'}</p>
                         </div>
                         <button onclick="togglePortal()" 
-                                class="px-6 py-3 rounded-lg ${settings.isOpen ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} text-white transition font-medium">
+                                class="w-full sm:w-auto px-6 py-2.5 rounded-xl ${settings.isOpen ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} text-white transition text-sm font-semibold shadow-sm">
                             ${settings.isOpen ? 'Close Portal' : 'Open Portal'}
                         </button>
                     </div>
                 </div>
                 
-                <!-- Portal Info -->
+                <!-- Portal Link & Message -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <p class="text-sm text-gray-500">Portal Link</p>
-                        <p class="text-sm font-mono text-indigo-600 break-all">${portalUrl}</p>
-                        <button onclick="getPortalLink()" class="mt-2 text-sm bg-indigo-100 text-indigo-700 px-3 py-1 rounded hover:bg-indigo-200">
+                    <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                        <p class="text-xs font-semibold text-gray-500 uppercase mb-1">Public Shareable Link</p>
+                        <p class="text-xs font-mono text-indigo-600 break-all bg-white p-2.5 rounded-lg border border-gray-200 mb-2">${portalUrl}</p>
+                        <button onclick="getPortalLink()" class="text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg hover:bg-indigo-100 font-medium transition flex items-center gap-1.5">
                             <i class="fas fa-copy"></i> Copy Link
                         </button>
                     </div>
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <p class="text-sm text-gray-500">Portal Message</p>
-                        <p class="text-sm text-gray-700">${settings.message || 'Results will be available soon.'}</p>
+                    <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                        <p class="text-xs font-semibold text-gray-500 uppercase mb-1">Closed Portal Message</p>
+                        <div class="bg-white p-3 rounded-lg border border-gray-200 min-h-[60px]">
+                            <p class="text-xs text-gray-700">${escapeHtml(settings.message) || 'Results will be available soon.'}</p>
+                        </div>
                     </div>
                 </div>
                 
                 <!-- Dates -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="bg-gray-50 rounded-lg p-4 text-center">
-                        <p class="text-sm text-gray-500">Opening Date</p>
-                        <p class="text-lg font-semibold ${settings.openingDate ? 'text-green-600' : 'text-gray-400'}">
+                    <div class="bg-gray-50 rounded-xl p-4 text-center border border-gray-100">
+                        <p class="text-xs font-semibold text-gray-500 uppercase">Opening Date</p>
+                        <p class="text-base font-bold mt-1 ${settings.openingDate ? 'text-green-600' : 'text-gray-400'}">
                             ${openingDisplay}
                         </p>
                     </div>
-                    <div class="bg-gray-50 rounded-lg p-4 text-center">
-                        <p class="text-sm text-gray-500">Closing Date</p>
-                        <p class="text-lg font-semibold ${settings.closingDate ? 'text-red-600' : 'text-gray-400'}">
+                    <div class="bg-gray-50 rounded-xl p-4 text-center border border-gray-100">
+                        <p class="text-xs font-semibold text-gray-500 uppercase">Closing Date</p>
+                        <p class="text-base font-bold mt-1 ${settings.closingDate ? 'text-red-600' : 'text-gray-400'}">
                             ${closingDisplay}
                         </p>
                     </div>
