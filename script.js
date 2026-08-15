@@ -290,6 +290,12 @@ function navigateTo(moduleId) {
         fnName = 'renderSchoolSettings';
         } else if (['requests', 'phone-requests', 'request-center', 'phone_requests'].includes(targetModule.id)) {
         fnName = 'renderRequestCenter';
+        } else if (['public-portal', 'results-portal', 'parent-portal'].includes(targetModule.id)) {
+        // Points to the public search/results view for parents/students
+        fnName = typeof renderPublicPortal === 'function' ? 'renderPublicPortal' : 'renderPortalView';
+    } else if (targetModule.id === 'portal') {
+        // Admin Portal Configuration Settings
+        fnName = typeof renderPortalSettings === 'function' ? 'renderPortalSettings' : 'renderSchoolSettings';
     }
 
     // Execute Module Render Function
@@ -10147,6 +10153,8 @@ window.addEventListener('DOMContentLoaded', handleInitialRoute);
 window.addEventListener('hashchange', handleInitialRoute);
 
 // Global scope exports for console debugging and HTML 
+window.renderPublicPortal = typeof renderPublicPortal === 'function' ? renderPublicPortal : renderPortalView;
+window.renderPortalView = typeof renderPortalView === 'function' ? renderPortalView : renderPublicPortal;
 window.renderRequestCenter = renderRequestCenter;
 window.renderRequests = renderRequestCenter;
 window.handleAdminProcessRequest = handleAdminProcessRequest;
