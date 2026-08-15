@@ -295,12 +295,8 @@ function navigateTo(moduleId) {
         fnName = typeof renderPublicPortal === 'function' ? 'renderPublicPortal' : 'renderPortalView';
     } else if (targetModule.id === 'portal') {
         // Admin Portal Configuration Settings
-        fnName = typeof renderPortalSettings === 'function' ? 'renderPortalSettings' : 'renderSchoolSettings';
+        fnName = typeof renderPortalSettings === 'function' ? 'renderPortalSettings' : 'renderPortalView';
         
-    }
-
-    if (['public-portal', 'results-portal', 'parent-portal', 'portal-view'].includes(targetModule.id)) {
-    fnName = 'renderPublicPortal';
     }
 
     // Execute Module Render Function
