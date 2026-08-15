@@ -9674,6 +9674,32 @@ function setupSidebar() {
 // ============================================
 // 2. CLOUD/STATIC ROUTING (HASH-BASED)
 // ============================================
+/**
+ * Normalizes module identifiers into clean objects with id, label, icon, and roles
+ */
+function normalizeModule(mod) {
+    if (!mod) {
+        return { id: 'dashboard', label: 'Dashboard', icon: 'fa-tachometer-alt', roles: ['Admin', 'Teacher', 'Accountant'] };
+    }
+    
+    if (typeof mod === 'string') {
+        const modules = (typeof APP_MODULES !== 'undefined') ? APP_MODULES : [];
+        const found = modules.find(m => m.id === mod);
+        if (found) return found;
+
+        // Fallback for unconfigured string routes
+        const formattedLabel = mod.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        return { 
+            id: mod, 
+            label: formattedLabel, 
+            icon: 'fa-folder', 
+            roles: ['Admin', 'Teacher', 'Accountant'] 
+        };
+    }
+    
+    return mod;
+}
+
 let activeModuleId = 'dashboard';
 
 /**
