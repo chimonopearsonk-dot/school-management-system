@@ -348,11 +348,7 @@ function showLoginPage() {
                     <i class="fas fa-sign-in-alt"></i> <span>Login</span>
                 </button>
             </form>
-            
-            <div class="mt-6 text-center text-xs text-gray-400 space-y-1 border-t border-gray-100 pt-4">
-                <p>Demo Admin: <span class="font-mono text-gray-600">admin / admin123</span></p>
-                <p>Demo Teacher: <span class="font-mono text-gray-600">teacher / teacher123</span></p>
-            </div>
+    
         </div>
     `;
 
