@@ -296,6 +296,11 @@ function navigateTo(moduleId) {
     } else if (targetModule.id === 'portal') {
         // Admin Portal Configuration Settings
         fnName = typeof renderPortalSettings === 'function' ? 'renderPortalSettings' : 'renderSchoolSettings';
+        
+    }
+
+    if (['public-portal', 'results-portal', 'parent-portal', 'portal-view'].includes(targetModule.id)) {
+    fnName = 'renderPublicPortal';
     }
 
     // Execute Module Render Function
@@ -9913,6 +9918,84 @@ function handleAdminProcessRequest(requestId, action) {
     }
 }
 
+function renderPublicPortal(container) {
+    if (!container) container = document.getElementById('main-content') || document.getElementById('content');
+    if (!container) return;
+
+    container.innerHTML = `
+        <div class="max-w-4xl mx-auto px-4 py-6">
+            <!-- Header Banner -->
+            <div class="bg-indigo-800 text-white rounded-2xl p-6 shadow-md mb-8 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div>
+                    <h1 class="text-2xl font-bold flex items-center gap-2">
+                        <span>📄</span> Results Portal
+                    </h1>
+                    <p class="text-sm text-indigo-200 mt-1">Bandawe Girls Secondary School</p>
+                </div>
+                <button onclick="window.location.reload()" class="bg-indigo-700 hover:bg-indigo-600 px-4 py-2 rounded-xl text-xs font-medium transition flex items-center gap-2">
+                    <i class="fas fa-sync-alt"></i> Refresh Portal
+                </button>
+            </div>
+
+            <!-- Portal Status Message -->
+            <div id="portal-status" class="text-center mb-8"></div>
+
+            <!-- Access Form Card -->
+            <div id="access-form" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 max-w-md mx-auto">
+                <div class="text-center mb-6">
+                    <div class="text-5xl mb-3">🔐</div>
+                    <h2 class="text-2xl font-bold text-gray-800">Access Your Results</h2>
+                    <p class="text-gray-500 text-sm mt-1">Enter Student ID, Full Name, and Parent Phone</p>
+                </div>
+                
+                <form id="portalLoginForm" onsubmit="portalLogin(event)">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 uppercase mb-1">Student ID *</label>
+                            <input type="text" id="portal-student-id" required 
+                                   class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                                   placeholder="e.g., BAGSS/2026/001">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 uppercase mb-1">Full Name *</label>
+                            <input type="text" id="portal-student-name" required 
+                                   class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                                   placeholder="e.g., Chimono Idah">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 uppercase mb-1">Parent/Guardian Phone *</label>
+                            <input type="tel" id="portal-parent-phone" required 
+                                   class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                                   placeholder="e.g., +265 888 123 456">
+                            <button type="button" onclick="renderParentPhoneRequestModal()" class="text-xs text-indigo-600 hover:text-indigo-800 underline mt-2 font-medium flex items-center gap-1">
+                                <i class="fas fa-edit"></i> Need to update your phone number?
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="portal-error" class="mt-4 p-3 bg-red-50 border border-red-200 text-red-600 text-xs rounded-xl hidden"></div>
+                    
+                    <button type="submit" 
+                            class="mt-6 w-full bg-indigo-600 text-white py-3 rounded-xl hover:bg-indigo-700 transition font-semibold text-sm shadow-sm flex items-center justify-center gap-2">
+                        <i class="fas fa-search"></i> View My Results
+                    </button>
+                </form>
+                
+                <div class="mt-6 text-center text-xs text-gray-400 space-y-1 border-t pt-4">
+                    <p>Your Student ID is listed on your report slip.</p>
+                    <p>Contact administration if you require assistance.</p>
+                </div>
+            </div>
+
+            <!-- Report Card Output Container -->
+            <div id="report-container" class="hidden mt-8"></div>
+        </div>
+    `;
+
+    // Initialize portal status check
+    loadPortalStatus();
+}
+
 // ============================================
 // PLACEHOLDER PAGES
 // ============================================
@@ -10152,7 +10235,15 @@ if (typeof auth !== 'undefined' && auth) {
 window.addEventListener('DOMContentLoaded', handleInitialRoute);
 window.addEventListener('hashchange', handleInitialRoute);
 
-// Global scope exports for console debugging and HTML 
+// Global scope exports for console debugging and HTML
+window.renderPublicPortal = renderPublicPortal;
+window.renderPortalView = renderPublicPortal;
+window.portalLogin = portalLogin;
+window.loadPortalStatus = loadPortalStatus;
+window.resetPortal = resetPortal;
+window.downloadPublishedReport = downloadPublishedReport;
+window.renderParentPhoneRequestModal = renderParentPhoneRequestModal;
+window.handleParentPhoneSubmit = handleParentPhoneSubmit;
 window.renderPublicPortal = typeof renderPublicPortal === 'function' ? renderPublicPortal : renderPortalView;
 window.renderPortalView = typeof renderPortalView === 'function' ? renderPortalView : renderPublicPortal;
 window.renderRequestCenter = renderRequestCenter;
