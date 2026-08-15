@@ -333,13 +333,13 @@ function showLoginPage() {
                         <label class="block text-xs font-semibold text-gray-600 uppercase mb-1">Username or Email</label>
                         <input type="text" id="login-username" required 
                                class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                               placeholder="admin or teacher">
+                               
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-600 uppercase mb-1">Password</label>
                         <input type="password" id="login-password" required 
                                class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                               placeholder="admin123 or teacher123">
+                               
                     </div>
                 </div>
                 
