@@ -250,33 +250,60 @@ function renderSidebar() {
 }
 
 function navigateTo(moduleId) {
-    const targetModule = APP_MODULES.find(m => m.id === moduleId) || APP_MODULES[0];
+    const targetModule = (typeof APP_MODULES !== 'undefined' && Array.isArray(APP_MODULES))
+        ? (APP_MODULES.find(m => m.id === moduleId) || APP_MODULES[0])
+        : { id: moduleId || 'dashboard', label: moduleId || 'Dashboard' };
+
     activeModuleId = targetModule.id;
 
     if (window.location.hash !== `#${targetModule.id}`) {
         window.location.hash = targetModule.id;
     }
 
-    renderSidebar();
+    if (typeof renderSidebar === 'function') {
+        renderSidebar();
+    }
 
-    const container = document.getElementById('main-content');
+    // Update Header Title
+    const pageTitle = document.getElementById('page-title');
+    if (pageTitle) {
+        pageTitle.innerText = targetModule.label || targetModule.id.toUpperCase();
+    }
+
+    // Support dual container IDs for full UI compatibility
+    const container = document.getElementById('main-content') || document.getElementById('content');
     if (!container) return;
 
+    // Handle Dashboard directly
     if (targetModule.id === 'dashboard') {
-        renderDashboard(container);
-    } else {
-        const fnName = `render${targetModule.id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('')}`;
-        if (typeof window[fnName] === 'function') {
-            container.innerHTML = '';
-            window[fnName](container);
-        } else {
-            container.innerHTML = `
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                    <h1 class="text-2xl font-bold text-gray-800 mb-2">${targetModule.label}</h1>
-                    <p class="text-gray-500">View container for <strong>${targetModule.id}</strong> loaded.</p>
-                </div>
-            `;
+        if (typeof renderDashboard === 'function') {
+            renderDashboard(container);
         }
+        return;
+    }
+
+    // Module Mapping & Aliases
+    let fnName = `render${targetModule.id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('')}`;
+
+    // Specific Module Aliases (Maps 'settings' -> 'renderSchoolSettings')
+    if (targetModule.id === 'settings' || targetModule.id === 'school-settings') {
+        fnName = 'renderSchoolSettings';
+    }
+
+    // Execute Module Render Function
+    if (typeof window[fnName] === 'function') {
+        container.innerHTML = '';
+        window[fnName](container);
+    } else {
+        container.innerHTML = `
+            <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 max-w-xl mx-auto my-6 text-center">
+                <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-3 text-xl font-bold">
+                    <i class="fas fa-folder-open"></i>
+                </div>
+                <h1 class="text-2xl font-bold text-gray-800 mb-2">${targetModule.label}</h1>
+                <p class="text-gray-500 text-sm">View container for <strong class="text-indigo-600">${targetModule.id}</strong> loaded.</p>
+            </div>
+        `;
     }
 }
 
@@ -9260,235 +9287,44 @@ function getSecureData(key) {
     }
 }
 
-// ============================================
-// SCHOOL SETTINGS
-// ============================================
+/**
+ * Main Render Function linked to 'settings' navigation route
+ */
+async function renderSchoolSettings(container) {
+    if (!container) container = document.getElementById('content') || document.getElementById('main-content');
+    if (!container) return;
 
-function showSchoolSettings() {
-    if (!isAdmin()) {
-        showToast('Access denied! Admin only.', 'error');
-        return;
-    }
-    
-    const settings = DataService.get('schoolSettings') || {
-        schoolName: 'BANDAWE GIRLS SECONDARY SCHOOL',
-        address: 'Private Bag 11, Chintheche',
-        email: 'bandawegirlssecondary@gmail.com',
-        phone: '+265 993 819 599',
-        motto: 'Dedicated to Excellence',
-        nextOpeningDate: new Date(new Date().getFullYear(), new Date().getMonth() + 2, 14).toISOString().split('T')[0],
-        fees: 'MK450,000',
-        accountName: 'Bandawe Girls Sec School',
-        bank: 'NBM',
-        branch: 'Mzuzu Branch',
-        accountNumber: '1467627',
-        currency: 'MK'
-    };
-    
-    const modal = document.getElementById('modal');
-    const modalContent = document.getElementById('modal-content');
-    
-    modal.classList.remove('hidden');
-    modal.style.display = 'flex';
-    
-    modalContent.innerHTML = `
-        <div class="flex justify-between items-center mb-6">
-            <h3 class="text-xl font-semibold">🏫 School Settings</h3>
-            <button type="button" onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        
-        <div class="text-sm text-gray-500 mb-4">Update your school information. These will appear on report cards.</div>
-        
-        <form id="schoolSettingsForm">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto p-1">
-                <!-- School Name -->
-                <div class="col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">School Name *</label>
-                    <input type="text" id="school-name" required 
-                           value="${escapeHtml(settings.schoolName || '')}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
-                
-                <!-- Address -->
-                <div class="col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Address</label>
-                    <input type="text" id="school-address" 
-                           value="${escapeHtml(settings.address || '')}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
-                
-                <!-- Email -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                    <input type="email" id="school-email" 
-                           value="${escapeHtml(settings.email || '')}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
-                
-                <!-- Phone -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                    <input type="text" id="school-phone" 
-                           value="${escapeHtml(settings.phone || '')}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
-                
-                <!-- Motto -->
-                <div class="col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">School Motto</label>
-                    <input type="text" id="school-motto" 
-                           value="${escapeHtml(settings.motto || '')}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
-                
-                <div class="border-t border-gray-200 col-span-2 my-2 pt-2">
-                    <p class="text-sm font-semibold text-gray-700">Report Card Information</p>
-                </div>
-                
-                <!-- Next Opening Date -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Next Opening Date</label>
-                    <input type="date" id="school-opening-date" 
-                           value="${settings.nextOpeningDate || ''}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
-                
-                <!-- Fees -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Fees Amount</label>
-                    <input type="text" id="school-fees" 
-                           value="${escapeHtml(settings.fees || '')}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500"
-                           placeholder="e.g., MK450,000">
-                </div>
-                
-                <div class="border-t border-gray-200 col-span-2 my-2 pt-2">
-                    <p class="text-sm font-semibold text-gray-700">Bank Details</p>
-                </div>
-                
-                <!-- Account Holder Name -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Account Holder Name</label>
-                    <input type="text" id="account-name" 
-                           value="${escapeHtml(settings.accountName || '')}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
-                
-                <!-- Bank -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Bank</label>
-                    <input type="text" id="bank-name" 
-                           value="${escapeHtml(settings.bank || '')}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500"
-                           placeholder="e.g., NBM, NBS Bank">
-                </div>
-                
-                <!-- Branch -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Branch</label>
-                    <input type="text" id="bank-branch" 
-                           value="${escapeHtml(settings.branch || '')}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
-                
-                <!-- Account Number -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
-                    <input type="text" id="account-number" 
-                           value="${escapeHtml(settings.accountNumber || '')}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500">
-                </div>
-                
-                <!-- Currency -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Currency Symbol</label>
-                    <input type="text" id="bank-currency" 
-                           value="${escapeHtml(settings.currency || 'MK')}"
-                           class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:border-indigo-500"
-                           placeholder="e.g., MK, $, K">
-                </div>
-            </div>
-            
-            <div class="mt-6 flex gap-3">
-                <button type="button" onclick="closeModal()" 
-                        class="flex-1 py-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
-                    Cancel
-                </button>
-                <button type="submit" 
-                        class="flex-1 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
-                    <i class="fas fa-save"></i> Save Settings
-                </button>
-            </div>
-        </form>
-    `;
-    
-    const innerCard = modal.querySelector('.bg-white');
-    if (innerCard) {
-        innerCard.classList.add('max-w-2xl');
-    }
-    
-    document.getElementById('schoolSettingsForm').onsubmit = function(e) {
-        e.preventDefault();
-        saveSchoolSettings();
-    };
-}
-
-function saveSchoolSettings() {
-    const form = document.getElementById('schoolSettingsForm');
-    if (!form) return;
-
-    // Grab values directly from form controls safely
-    const schoolName = form.querySelector('#school-name')?.value.trim() || '';
-    
-    if (!schoolName) {
-        showToast('School name is required. Please enter a school name.', 'error');
-        return;
-    }
-    
-    const settings = {
-        schoolName: schoolName,
-        address: form.querySelector('#school-address')?.value.trim() || '',
-        email: form.querySelector('#school-email')?.value.trim() || '',
-        phone: form.querySelector('#school-phone')?.value.trim() || '',
-        motto: form.querySelector('#school-motto')?.value.trim() || '',
-        nextOpeningDate: form.querySelector('#school-opening-date')?.value || null,
-        fees: form.querySelector('#school-fees')?.value.trim() || '',
-        accountName: form.querySelector('#account-name')?.value.trim() || '',
-        bank: form.querySelector('#bank-name')?.value.trim() || '',
-        branch: form.querySelector('#bank-branch')?.value.trim() || '',
-        accountNumber: form.querySelector('#account-number')?.value.trim() || '',
-        currency: form.querySelector('#bank-currency')?.value.trim() || 'MK'
-    };
-    
-    // Persist data
-    DataService.set('schoolSettings', settings);
-    showToast('School settings saved successfully!', 'success');
-    closeModal();
-    
-    // Refresh the view page
-    const container = document.getElementById('content');
-    if (container) {
-        renderSchoolSettings(container);
-    }
-}
-
-function renderSchoolSettings(container) {
-    if (!isAdmin()) {
+    if (typeof isAdmin === 'function' && !isAdmin()) {
         container.innerHTML = `
-            <div class="bg-white rounded-2xl shadow p-8 text-center">
-                <i class="fas fa-lock text-6xl text-red-400 mb-4"></i>
-                <h3 class="text-2xl font-semibold text-gray-600">Access Denied</h3>
-                <p class="text-gray-500 mt-2">You do not have permission to view this page.</p>
+            <div class="bg-white rounded-2xl shadow-sm p-12 text-center max-w-lg mx-auto my-8">
+                <div class="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                    <i class="fas fa-lock"></i>
+                </div>
+                <h3 class="text-xl font-bold text-gray-800">Access Denied</h3>
+                <p class="text-gray-500 mt-2 text-sm">Administrative privileges are required to manage system settings.</p>
             </div>
         `;
         return;
     }
-    
-    // Fetch saved settings first, default only if no saved settings exist at all
-    const saved = DataService.get('schoolSettings');
-    const s = saved || {
+
+    // Load from DataService or Firestore
+    let s = null;
+    try {
+        if (typeof DataService !== 'undefined' && DataService.get) {
+            s = DataService.get('schoolSettings');
+        }
+        
+        // Firestore sync fallback
+        if (!s && typeof db !== 'undefined') {
+            const doc = await db.collection('settings').doc('schoolSettings').get();
+            if (doc.exists) s = doc.data();
+        }
+    } catch (err) {
+        console.warn('Error fetching settings:', err);
+    }
+
+    // Default Fallbacks
+    s = s || {
         schoolName: 'BANDAWE GIRLS SECONDARY SCHOOL',
         address: 'Private Bag 11, Chintheche',
         email: 'bandawegirlssecondary@gmail.com',
@@ -9502,57 +9338,323 @@ function renderSchoolSettings(container) {
         accountNumber: '1467627',
         currency: 'MK'
     };
-    
+
     container.innerHTML = `
-        <div class="max-w-4xl mx-auto">
-            <div class="bg-white rounded-2xl shadow p-6">
-                <div class="flex justify-between items-center mb-6">
-                    <h3 class="text-2xl font-semibold text-gray-800">🏫 School Settings</h3>
-                    <button onclick="showSchoolSettings()" 
-                            class="bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 transition">
-                        <i class="fas fa-edit"></i> Edit Settings
-                    </button>
+        <div class="max-w-5xl mx-auto space-y-6">
+            <!-- Header Banner -->
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h3 class="text-2xl font-bold text-gray-800 flex items-center gap-3">
+                        <span class="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
+                            <i class="fas fa-sliders-h text-xl"></i>
+                        </span>
+                        School & System Settings
+                    </h3>
+                    <p class="text-gray-500 text-sm mt-1">Manage institutional details, billing, and report card preferences.</p>
                 </div>
+                <button onclick="showSchoolSettings()" 
+                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-medium shadow-sm flex items-center gap-2 transition active:scale-95">
+                    <i class="fas fa-edit"></i> Edit Settings
+                </button>
+            </div>
+
+            <!-- Main Content Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <p class="text-sm text-gray-500">School Name</p>
-                        <p class="font-semibold">${escapeHtml(s.schoolName || 'N/A')}</p>
+                <!-- General Info -->
+                <div class="md:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
+                    <h4 class="text-lg font-semibold text-gray-800 border-b pb-3 flex items-center gap-2">
+                        <i class="fas fa-school text-indigo-500"></i> General Information
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div class="bg-gray-50 rounded-xl p-3.5 border border-gray-100">
+                            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">School Name</p>
+                            <p class="font-bold text-gray-800 text-base mt-1">${safeEscapeHtml(s.schoolName)}</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-xl p-3.5 border border-gray-100">
+                            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Motto</p>
+                            <p class="font-semibold text-gray-700 text-base mt-1 italic">"${safeEscapeHtml(s.motto)}"</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-xl p-3.5 border border-gray-100">
+                            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Email Address</p>
+                            <p class="font-medium text-gray-800 text-sm mt-1">${safeEscapeHtml(s.email)}</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-xl p-3.5 border border-gray-100">
+                            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Phone</p>
+                            <p class="font-medium text-gray-800 text-sm mt-1">${safeEscapeHtml(s.phone)}</p>
+                        </div>
+                        <div class="sm:col-span-2 bg-gray-50 rounded-xl p-3.5 border border-gray-100">
+                            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Postal / Physical Address</p>
+                            <p class="font-medium text-gray-800 text-sm mt-1">${safeEscapeHtml(s.address)}</p>
+                        </div>
                     </div>
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <p class="text-sm text-gray-500">Address</p>
-                        <p class="font-semibold">${escapeHtml(s.address || 'N/A')}</p>
+                </div>
+
+                <!-- Academic & Report Settings -->
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
+                    <h4 class="text-lg font-semibold text-gray-800 border-b pb-3 flex items-center gap-2">
+                        <i class="fas fa-file-invoice text-indigo-500"></i> Report Defaults
+                    </h4>
+                    <div class="space-y-3">
+                        <div class="bg-indigo-50/50 rounded-xl p-3.5 border border-indigo-100">
+                            <p class="text-xs font-semibold text-indigo-500 uppercase tracking-wider">Next Term Begins</p>
+                            <p class="font-bold text-indigo-900 text-lg mt-0.5">${safeFormatDate(s.nextOpeningDate)}</p>
+                        </div>
+                        <div class="bg-emerald-50/50 rounded-xl p-3.5 border border-emerald-100">
+                            <p class="text-xs font-semibold text-emerald-600 uppercase tracking-wider">Term Tuition Fees</p>
+                            <p class="font-bold text-emerald-950 text-lg mt-0.5">${safeEscapeHtml(s.fees)}</p>
+                        </div>
                     </div>
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <p class="text-sm text-gray-500">Email</p>
-                        <p class="font-semibold">${escapeHtml(s.email || 'N/A')}</p>
-                    </div>
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <p class="text-sm text-gray-500">Phone</p>
-                        <p class="font-semibold">${escapeHtml(s.phone || 'N/A')}</p>
-                    </div>
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <p class="text-sm text-gray-500">Motto</p>
-                        <p class="font-semibold">"${escapeHtml(s.motto || 'N/A')}"</p>
-                    </div>
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <p class="text-sm text-gray-500">Next Opening Date</p>
-                        <p class="font-semibold">${s.nextOpeningDate ? formatDate(s.nextOpeningDate) : 'Not set'}</p>
-                    </div>
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <p class="text-sm text-gray-500">Fees</p>
-                        <p class="font-semibold">${escapeHtml(s.fees || 'N/A')}</p>
-                    </div>
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <p class="text-sm text-gray-500">Bank Details</p>
-                        <p class="font-semibold text-sm">${escapeHtml(s.accountName || 'N/A')}</p>
-                        <p class="font-semibold text-sm">${escapeHtml(s.bank || '')}, ${escapeHtml(s.branch || '')}</p>
-                        <p class="font-semibold text-sm">Acc: ${escapeHtml(s.accountNumber || 'N/A')}</p>
+                </div>
+
+                <!-- Bank Details -->
+                <div class="md:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <h4 class="text-lg font-semibold text-gray-800 border-b pb-3 mb-4 flex items-center gap-2">
+                        <i class="fas fa-university text-indigo-500"></i> Banking & Payment Information
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                        <div class="bg-gray-50 rounded-xl p-3.5 border border-gray-100">
+                            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Account Name</p>
+                            <p class="font-bold text-gray-800 text-sm mt-1">${safeEscapeHtml(s.accountName)}</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-xl p-3.5 border border-gray-100">
+                            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Bank Name</p>
+                            <p class="font-bold text-gray-800 text-sm mt-1">${safeEscapeHtml(s.bank)}</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-xl p-3.5 border border-gray-100">
+                            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Branch / Currency</p>
+                            <p class="font-bold text-gray-800 text-sm mt-1">${safeEscapeHtml(s.branch)} (${safeEscapeHtml(s.currency || 'MK')})</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-xl p-3.5 border border-gray-100">
+                            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Account Number</p>
+                            <p class="font-bold text-indigo-600 text-base mt-1 font-mono">${safeEscapeHtml(s.accountNumber)}</p>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     `;
+}
+
+/**
+ * Opens Modal Form
+ */
+function showSchoolSettings() {
+    if (typeof isAdmin === 'function' && !isAdmin()) {
+        if (typeof showToast === 'function') showToast('Access denied! Admin permissions required.', 'error');
+        return;
+    }
+    
+    let settings = {};
+    if (typeof DataService !== 'undefined' && DataService.get) {
+        settings = DataService.get('schoolSettings') || {};
+    }
+
+    settings = Object.assign({
+        schoolName: 'BANDAWE GIRLS SECONDARY SCHOOL',
+        address: 'Private Bag 11, Chintheche',
+        email: 'bandawegirlssecondary@gmail.com',
+        phone: '+265 993 819 599',
+        motto: 'Dedicated to Excellence',
+        nextOpeningDate: '',
+        fees: 'MK450,000',
+        accountName: 'Bandawe Girls Sec School',
+        bank: 'NBM',
+        branch: 'Mzuzu Branch',
+        accountNumber: '1467627',
+        currency: 'MK'
+    }, settings);
+    
+    const modal = document.getElementById('modal');
+    const modalContent = document.getElementById('modal-content');
+    if (!modal || !modalContent) return;
+    
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    
+    modalContent.innerHTML = `
+        <div class="flex justify-between items-center pb-4 border-b border-gray-100">
+            <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <i class="fas fa-sliders-h text-indigo-600"></i> Edit System Settings
+            </h3>
+            <button type="button" onclick="closeModal()" class="text-gray-400 hover:text-gray-600 transition p-1">
+                <i class="fas fa-times text-lg"></i>
+            </button>
+        </div>
+        
+        <form id="schoolSettingsForm" class="mt-4 space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto pr-1">
+                
+                <div class="col-span-2">
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">School Name *</label>
+                    <input type="text" id="school-name" required value="${safeEscapeHtml(settings.schoolName)}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+                
+                <div class="col-span-2">
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Address</label>
+                    <input type="text" id="school-address" value="${safeEscapeHtml(settings.address)}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Email Address</label>
+                    <input type="email" id="school-email" value="${safeEscapeHtml(settings.email)}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Phone Number</label>
+                    <input type="text" id="school-phone" value="${safeEscapeHtml(settings.phone)}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+                
+                <div class="col-span-2">
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">School Motto</label>
+                    <input type="text" id="school-motto" value="${safeEscapeHtml(settings.motto)}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+                
+                <div class="col-span-2 border-t pt-3 mt-1">
+                    <p class="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-2">Report Card Defaults</p>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Next Opening Date</label>
+                    <input type="date" id="school-opening-date" value="${settings.nextOpeningDate || ''}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Fees Amount</label>
+                    <input type="text" id="school-fees" value="${safeEscapeHtml(settings.fees)}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+                
+                <div class="col-span-2 border-t pt-3 mt-1">
+                    <p class="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-2">Bank Details</p>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Account Holder Name</label>
+                    <input type="text" id="account-name" value="${safeEscapeHtml(settings.accountName)}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Bank Name</label>
+                    <input type="text" id="bank-name" value="${safeEscapeHtml(settings.bank)}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Branch</label>
+                    <input type="text" id="bank-branch" value="${safeEscapeHtml(settings.branch)}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Account Number</label>
+                    <input type="text" id="account-number" value="${safeEscapeHtml(settings.accountNumber)}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Currency Symbol</label>
+                    <input type="text" id="bank-currency" value="${safeEscapeHtml(settings.currency || 'MK')}"
+                           class="w-full px-3.5 py-2.5 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+                </div>
+            </div>
+            
+            <div class="pt-4 border-t flex gap-3">
+                <button type="button" onclick="closeModal()" 
+                        class="flex-1 py-2.5 text-gray-600 border border-gray-300 rounded-xl font-medium hover:bg-gray-50 transition">
+                    Cancel
+                </button>
+                <button type="submit" id="save-settings-btn"
+                        class="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition flex items-center justify-center gap-2">
+                    <i class="fas fa-save"></i> Save Settings
+                </button>
+            </div>
+        </form>
+    `;
+    
+    const form = document.getElementById('schoolSettingsForm');
+    if (form) {
+        form.onsubmit = async function(e) {
+            e.preventDefault();
+            await saveSchoolSettings();
+        };
+    }
+}
+
+/**
+ * Handles Form Submission & Storage Sync
+ */
+async function saveSchoolSettings() {
+    const form = document.getElementById('schoolSettingsForm');
+    const submitBtn = document.getElementById('save-settings-btn');
+    if (!form) return;
+
+    const schoolName = form.querySelector('#school-name')?.value.trim() || '';
+    if (!schoolName) {
+        if (typeof showToast === 'function') showToast('School name is required.', 'error');
+        return;
+    }
+    
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving...`;
+    }
+    
+    const settings = {
+        schoolName: schoolName,
+        address: form.querySelector('#school-address')?.value.trim() || '',
+        email: form.querySelector('#school-email')?.value.trim() || '',
+        phone: form.querySelector('#school-phone')?.value.trim() || '',
+        motto: form.querySelector('#school-motto')?.value.trim() || '',
+        nextOpeningDate: form.querySelector('#school-opening-date')?.value || '',
+        fees: form.querySelector('#school-fees')?.value.trim() || '',
+        accountName: form.querySelector('#account-name')?.value.trim() || '',
+        bank: form.querySelector('#bank-name')?.value.trim() || '',
+        branch: form.querySelector('#bank-branch')?.value.trim() || '',
+        accountNumber: form.querySelector('#account-number')?.value.trim() || '',
+        currency: form.querySelector('#bank-currency')?.value.trim() || 'MK',
+        updatedAt: new Date().toISOString()
+    };
+    
+    try {
+        // Save to DataService / LocalStorage
+        if (typeof DataService !== 'undefined' && DataService.set) {
+            DataService.set('schoolSettings', settings);
+        }
+
+        // Save to Firestore Database
+        if (typeof db !== 'undefined') {
+            await db.collection('settings').doc('schoolSettings').set(settings, { merge: true });
+        }
+
+        // Dynamically update UI branding on sidebar
+        const sidebarSchoolName = document.getElementById('school-name');
+        if (sidebarSchoolName) sidebarSchoolName.innerText = settings.schoolName;
+
+        if (typeof showToast === 'function') showToast('Settings saved successfully!', 'success');
+        if (typeof closeModal === 'function') closeModal();
+        
+        // Refresh Settings View
+        const container = document.getElementById('content') || document.getElementById('main-content');
+        if (container) {
+            await renderSchoolSettings(container);
+        }
+    } catch (err) {
+        console.error('Save Settings Error:', err);
+        if (typeof showToast === 'function') showToast('Failed to save settings to database.', 'error');
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = `<i class="fas fa-save"></i> Save Settings`;
+        }
+    }
 }
 
 // ============================================
@@ -10017,6 +10119,10 @@ window.addEventListener('DOMContentLoaded', handleInitialRoute);
 window.addEventListener('hashchange', handleInitialRoute);
 
 // Global scope exports for console debugging and HTML handlers
+window.renderSchoolSettings = renderSchoolSettings;
+window.renderSettings = renderSchoolSettings;
+window.showSchoolSettings = showSchoolSettings;
+window.saveSchoolSettings = saveSchoolSettings;
 window.initApp = initApp;
 window.showLoginPage = showLoginPage;
 window.renderLoginForm = renderLoginForm;
