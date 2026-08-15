@@ -9903,11 +9903,7 @@ function hideLoadingSpinner() {
     // 3. Ensure body scroll is re-enabled if locked by a modal
     document.body.classList.remove('overflow-hidden', 'modal-open');
 }
-
-let currentUser = null;
     
-
-
 function renderLoginForm() {
     showLoginPage();
 }
@@ -9919,7 +9915,7 @@ function checkAuth() {
     const savedUser = localStorage.getItem('currentUser');
     if (savedUser) {
         try {
-            currentUser = JSON.parse(savedUser);
+            window.currentUser = JSON.parse(savedUser);
             return true;
         } catch (e) {
             localStorage.removeItem('currentUser');
@@ -9929,13 +9925,13 @@ function checkAuth() {
     return false;
 }
 
-function getUserRole() { return currentUser ? currentUser.role : null; }
+function getUserRole() { return window.currentUser ? window.currentUser.role : null; }
 function isAdmin() { return getUserRole() === 'Admin'; }
 function isTeacher() { return getUserRole() === 'Teacher'; }
 function isAccountant() { return getUserRole() === 'Accountant'; }
 function hasAccess(allowedRoles) {
-    if (!currentUser) return false;
-    return allowedRoles.includes(currentUser.role);
+    if (!window.currentUser) return false;
+    return allowedRoles.includes(window.currentUser.role);
 }
 
 function requireAuth() {
@@ -9950,14 +9946,13 @@ function requireAuth() {
 document.addEventListener('DOMContentLoaded', () => {
     // Restore session if available
     const savedUser = localStorage.getItem('currentUser');
-    if (savedUser && !currentUser) {
+    if (savedUser && !window.currentUser) {
         try {
-            currentUser = JSON.parse(savedUser);
-            window.currentUser = currentUser;
+            window.currentUser = JSON.parse(savedUser);
         } catch (e) {}
     }
 
-    if (currentUser) {
+    if (window.currentUser) {
         if (typeof initApp === 'function') initApp();
         handleInitialRoute();
     } else {
@@ -9970,8 +9965,8 @@ if (typeof auth !== 'undefined' && auth) {
     auth.onAuthStateChanged(async (fbUser) => {
         if (fbUser) {
             // Fetch/Sync user details from Firestore if connected
-            if (!currentUser || currentUser.uid !== fbUser.uid) {
-                currentUser = {
+            if (!window.currentUser || window.currentUser.uid !== fbUser.uid) {
+                window.currentUser = {
                     uid: fbUser.uid,
                     email: fbUser.email,
                     username: fbUser.email ? fbUser.email.split('@')[0] : 'User',
@@ -9983,16 +9978,16 @@ if (typeof auth !== 'undefined' && auth) {
                         const docSnap = await db.collection('users').doc(fbUser.uid).get();
                         if (docSnap.exists) {
                             const data = docSnap.data();
-                            currentUser.role = data.role || 'Admin';
-                            currentUser.fullName = data.fullName || fbUser.displayName;
+                            window.currentUser.role = data.role || 'Admin';
+                            window.currentUser.fullName = data.fullName || fbUser.displayName;
                         }
                     }
                 } catch (e) {
                     console.warn("Firestore sync warning:", e);
                 }
 
-                localStorage.setItem('currentUser', JSON.stringify(currentUser));
-                window.currentUser = currentUser;
+                localStorage.setItem('currentUser', JSON.stringify(window.currentUser));
+                window.currentUser = window.currentUser;
             }
 
             if (typeof initApp === 'function') initApp();
@@ -10003,15 +9998,13 @@ if (typeof auth !== 'undefined' && auth) {
             const savedUser = localStorage.getItem('currentUser');
             if (savedUser) {
                 try {
-                    currentUser = JSON.parse(savedUser);
-                    window.currentUser = currentUser;
+                    window.currentUser = JSON.parse(savedUser);
                     // Preserve local user without clearing session
                     return;
                 } catch (e) {}
             }
 
             // No active session in Firebase or Local DB -> Clear and redirect to login
-            currentUser = null;
             window.currentUser = null;
             localStorage.removeItem('currentUser');
             if (typeof showLoginPage === 'function') showLoginPage();
