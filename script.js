@@ -1,20 +1,534 @@
 // School Management System
-// ============================================
 
-// Define system modules/pages mapping
+// ============================================
+// 2. CLOUD/STATIC ROUTING (HASH-BASED)
+// ============================================
+/**
+ * Normalizes module identifiers into clean objects with id, label, icon, and roles
+ */
+function normalizeModule(mod) {
+    if (!mod) {
+        return { id: 'dashboard', label: 'Dashboard', icon: 'fa-tachometer-alt', roles: ['Admin', 'Teacher', 'Accountant'] };
+    }
+    
+    if (typeof mod === 'string') {
+        const modules = (typeof APP_MODULES !== 'undefined') ? APP_MODULES : [];
+        const found = modules.find(m => m.id === mod);
+        if (found) return found;
+
+        // Fallback for unconfigured string routes
+        const formattedLabel = mod.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        return { 
+            id: mod, 
+            label: formattedLabel, 
+            icon: 'fa-folder', 
+            roles: ['Admin', 'Teacher', 'Accountant'] 
+        };
+    }
+    
+    return mod;
+}
+
+// ============================================
+// 1. APP CONFIGURATION & SYSTEM MODULES
+// ============================================
 const APP_MODULES = [
-    'dashboard',
-    'teacher-dashboard',
-    'student-registry',
-    'teachers',
-    'classes',
-    'attendance',
-    'grades',
-    'users',
-    'portal',
-    'settings',
-    'requests'
+    { id: 'dashboard', label: 'Dashboard', icon: 'fa-tachometer-alt', roles: ['Admin'] },
+    { id: 'teacher-dashboard', label: 'Teacher Dashboard', icon: 'fa-chalkboard-teacher', roles: ['Teacher'] },
+    { id: 'student-registry', label: 'Student Registry', icon: 'fa-user-graduate', roles: ['Admin', 'Teacher'] },
+    { id: 'teachers', label: 'Teachers', icon: 'fa-user-tie', roles: ['Admin'] },
+    { id: 'classes', label: 'Classes & Forms', icon: 'fa-school', roles: ['Admin', 'Teacher'] },
+    { id: 'attendance', label: 'Attendance', icon: 'fa-clipboard-user', roles: ['Admin', 'Teacher'] },
+    { id: 'grades', label: 'Grades & Reports', icon: 'fa-file-invoice', roles: ['Admin', 'Teacher'] },
+    { id: 'users', label: 'User Management', icon: 'fa-users-cog', roles: ['Admin'] },
+    { id: 'portal', label: 'Portal', icon: 'fa-id-card', roles: ['Admin', 'Teacher', 'Accountant'] },
+    { id: 'settings', label: 'System Settings', icon: 'fa-sliders-h', roles: ['Admin'] },
+    { id: 'requests', label: 'Requests & Leave', icon: 'fa-envelope-open-text', roles: ['Admin', 'Teacher'] }
 ];
+
+let currentUser = null;
+let activeModuleId = 'dashboard';
+
+// ============================================
+// 2. DATA SERVICES & INITIAL SEEDING
+// ============================================
+const DataService = {
+    generateId(prefix = 'BAGSS', year = new Date().getFullYear()) {
+        const timestamp = Date.now().toString().slice(-4);
+        const randomDigits = Math.floor(100 + Math.random() * 900);
+        return `${prefix}/${year}/${timestamp}${randomDigits}`;
+    },
+
+    get(key) {
+        try {
+            const data = localStorage.getItem(key);
+            return data ? JSON.parse(data) : [];
+        } catch (e) {
+            console.warn(`DataService.get error for key "${key}":`, e);
+            return [];
+        }
+    },
+
+    set(key, data) {
+        try {
+            localStorage.setItem(key, JSON.stringify(data));
+        } catch (e) {
+            console.error("DataService.set error:", e);
+        }
+    },
+
+    async getStudents() {
+        try {
+            if (typeof db !== 'undefined' && db) {
+                const snapshot = await db.collection('students').get();
+                return snapshot.docs.map(doc => ({ firebaseDocId: doc.id, ...doc.data() }));
+            }
+            return this.get('students');
+        } catch (error) {
+            return this.get('students');
+        }
+    }
+};
+
+// Seed default users if none exist
+(function seedDefaultUsers() {
+    let users = DataService.get('users');
+    if (!users || users.length === 0) {
+        users = [
+            {
+                id: DataService.generateId('USR'),
+                username: 'admin',
+                email: 'admin@school.com',
+                password: 'admin123',
+                role: 'Admin',
+                name: 'System Administrator',
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: DataService.generateId('USR'),
+                username: 'teacher',
+                email: 'teacher@school.com',
+                password: 'teacher123',
+                role: 'Teacher',
+                name: 'Main Teacher',
+                createdAt: new Date().toISOString()
+            }
+        ];
+        DataService.set('users', users);
+    }
+})();
+
+// ============================================
+// 3. UTILITY FUNCTIONS & TOAST
+// ============================================
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function showToast(message, type = 'info') {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'fixed bottom-5 right-5 z-50 flex flex-col gap-2';
+        document.body.appendChild(container);
+    }
+    
+    const toast = document.createElement('div');
+    toast.className = `toast flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-white transition-all duration-300 ${
+        type === 'success' ? 'bg-green-600' :
+        type === 'error' ? 'bg-red-600' :
+        type === 'warning' ? 'bg-amber-500' : 'bg-indigo-600'
+    }`;
+    
+    toast.innerHTML = `
+        <i class="fas ${
+            type === 'success' ? 'fa-check-circle' :
+            type === 'error' ? 'fa-exclamation-circle' :
+            type === 'warning' ? 'fa-exclamation-triangle' : 'fa-info-circle'
+        }"></i>
+        <span>${escapeHtml(message)}</span>
+    `;
+    
+    container.appendChild(toast);
+    setTimeout(() => { if (toast.parentNode) toast.remove(); }, 3000);
+}
+
+function getUserRole() {
+    return currentUser ? currentUser.role : null;
+}
+
+function getDashboardForRole() {
+    const role = getUserRole();
+    if (role === 'Teacher') return 'teacher-dashboard';
+    if (role === 'Accountant') return 'portal';
+    return 'dashboard';
+}
+
+// ============================================
+// 4. NAVIGATION & SIDEBAR LOGIC
+// ============================================
+function setupSidebar() {
+    const sidebar = document.getElementById("sidebar");
+    const toggleBtn = document.getElementById("sidebar-collapse");
+    const mobileBtn = document.getElementById("header-menu-btn");
+
+    if (!sidebar) return;
+
+    if (toggleBtn) {
+        toggleBtn.addEventListener("click", function() {
+            sidebar.classList.toggle("collapsed");
+            const icon = document.getElementById("collapse-icon");
+            if (icon) {
+                icon.className = sidebar.classList.contains("collapsed") 
+                    ? "fas fa-chevron-right text-xs" 
+                    : "fas fa-chevron-left text-xs";
+            }
+            localStorage.setItem("sidebarCollapsed", sidebar.classList.contains("collapsed"));
+        });
+    }
+
+    if (mobileBtn) {
+        mobileBtn.addEventListener("click", function() {
+            sidebar.classList.toggle("mobile-open");
+        });
+    }
+
+    if (window.innerWidth >= 1024 && localStorage.getItem("sidebarCollapsed") === "true") {
+        sidebar.classList.add("collapsed");
+        const icon = document.getElementById("collapse-icon");
+        if (icon) icon.className = "fas fa-chevron-right text-xs";
+    }
+
+    document.addEventListener("click", function(e) {
+        if (window.innerWidth < 1024) {
+            const isSidebar = sidebar.contains(e.target);
+            const isToggle = mobileBtn && mobileBtn.contains(e.target);
+            if (!isSidebar && !isToggle) {
+                sidebar.classList.remove("mobile-open");
+            }
+        }
+    });
+}
+
+function renderSidebar() {
+    const navContainer = document.getElementById('main-nav');
+    if (!navContainer) return;
+
+    const currentRole = getUserRole();
+    const currentRoute = activeModuleId || getDashboardForRole();
+
+    const allowedModules = APP_MODULES.filter(mod => {
+        if (!mod.roles) return true;
+        return mod.roles.includes(currentRole);
+    });
+
+    navContainer.innerHTML = allowedModules.map(mod => {
+        const isActive = (mod.id === currentRoute);
+        return `
+            <a href="#${mod.id}" 
+               class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                   isActive 
+                     ? 'bg-indigo-700 text-white font-semibold shadow-sm' 
+                     : 'text-indigo-200 hover:bg-indigo-800 hover:text-white'
+               }" 
+               onclick="event.preventDefault(); navigateTo('${mod.id}');">
+                <i class="fas ${mod.icon} w-5 text-center text-base"></i>
+                <span class="sidebar-text truncate">${mod.label}</span>
+            </a>
+        `;
+    }).join('');
+}
+
+function navigateTo(moduleId) {
+    const targetModule = APP_MODULES.find(m => m.id === moduleId) || APP_MODULES[0];
+    activeModuleId = targetModule.id;
+
+    if (window.location.hash !== `#${targetModule.id}`) {
+        window.location.hash = targetModule.id;
+    }
+
+    renderSidebar();
+
+    const container = document.getElementById('main-content');
+    if (!container) return;
+
+    if (targetModule.id === 'dashboard') {
+        renderDashboard(container);
+    } else {
+        const fnName = `render${targetModule.id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('')}`;
+        if (typeof window[fnName] === 'function') {
+            container.innerHTML = '';
+            window[fnName](container);
+        } else {
+            container.innerHTML = `
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <h1 class="text-2xl font-bold text-gray-800 mb-2">${targetModule.label}</h1>
+                    <p class="text-gray-500">View container for <strong>${targetModule.id}</strong> loaded.</p>
+                </div>
+            `;
+        }
+    }
+}
+
+// ============================================
+// 5. AUTHENTICATION & LOGIN SCREEN
+// ============================================
+function showLoginPage() {
+    let loginScreen = document.getElementById('login-screen');
+    if (!loginScreen) return;
+
+    loginScreen.innerHTML = `
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 border border-gray-100">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-3 text-indigo-600 text-2xl">
+                    <i class="fas fa-university"></i>
+                </div>
+                <h1 class="text-xl font-bold text-gray-800">Bandawe Girls Secondary School</h1>
+                <p class="text-gray-500 text-xs mt-1">Information Management System</p>
+            </div>
+            
+            <form id="loginForm" onsubmit="loginUser(event)">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 uppercase mb-1">Username or Email</label>
+                        <input type="text" id="login-username" required 
+                               class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                               placeholder="admin or teacher">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 uppercase mb-1">Password</label>
+                        <input type="password" id="login-password" required 
+                               class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                               placeholder="admin123 or teacher123">
+                    </div>
+                </div>
+                
+                <button type="submit" id="btn-login-submit"
+                        class="mt-6 w-full bg-indigo-600 text-white py-2.5 rounded-lg hover:bg-indigo-700 transition font-semibold text-sm flex items-center justify-center gap-2">
+                    <i class="fas fa-sign-in-alt"></i> <span>Login</span>
+                </button>
+            </form>
+            
+            <div class="mt-6 text-center text-xs text-gray-400 space-y-1 border-t border-gray-100 pt-4">
+                <p>Demo Admin: <span class="font-mono text-gray-600">admin / admin123</span></p>
+                <p>Demo Teacher: <span class="font-mono text-gray-600">teacher / teacher123</span></p>
+            </div>
+        </div>
+    `;
+
+    loginScreen.classList.remove('hidden');
+    const appLayout = document.getElementById('app-layout');
+    if (appLayout) appLayout.classList.add('hidden');
+}
+
+function initApp() {
+    const loginScreen = document.getElementById('login-screen');
+    if (loginScreen) loginScreen.classList.add('hidden');
+
+    const appLayout = document.getElementById('app-layout');
+    if (appLayout) appLayout.classList.remove('hidden');
+
+    updateUserProfile();
+    renderSidebar();
+}
+
+function loginUser(event) {
+    if (event) event.preventDefault();
+
+    const usernameInput = (document.getElementById('login-username')?.value || '').trim();
+    const passwordInput = (document.getElementById('login-password')?.value || '').trim();
+
+    const users = DataService.get('users') || [];
+    const matchedUser = users.find(u => 
+        (u.username && u.username.toLowerCase() === usernameInput.toLowerCase()) || 
+        (u.email && u.email.toLowerCase() === usernameInput.toLowerCase())
+    );
+
+    if (matchedUser && matchedUser.password === passwordInput) {
+        currentUser = matchedUser;
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        showToast('Login successful!', 'success');
+        initApp();
+        navigateTo(getDashboardForRole());
+        return;
+    }
+
+    showToast('Invalid credentials provided.', 'error');
+}
+
+function handleLogout() {
+    currentUser = null;
+    localStorage.removeItem('currentUser');
+    showToast('Logged out successfully', 'info');
+    showLoginPage();
+}
+
+function updateUserProfile() {
+    const nameEl = document.getElementById('user-name');
+    const roleEl = document.getElementById('user-role');
+    if (nameEl) nameEl.textContent = currentUser?.name || currentUser?.username || 'Guest';
+    if (roleEl) roleEl.textContent = currentUser?.role || 'User';
+}
+
+function handleInitialRoute() {
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser) {
+        try {
+            currentUser = JSON.parse(savedUser);
+        } catch (e) {
+            localStorage.removeItem('currentUser');
+        }
+    }
+
+    if (!currentUser) {
+        showLoginPage();
+        return;
+    }
+
+    initApp();
+    const hashRoute = window.location.hash.replace('#', '');
+    const validModule = APP_MODULES.find(m => m.id === hashRoute);
+    navigateTo(validModule ? validModule.id : getDashboardForRole());
+}
+
+// ============================================
+// 6. DASHBOARD MODULE VIEW
+// ============================================
+function renderDashboard(container) {
+    const students = DataService.get('students') || [];
+    const teachers = DataService.get('teachers') || [];
+    const classes = DataService.get('classes') || [];
+    
+    const studentsByClass = {};
+    students.forEach(s => {
+        const cls = s.class || 'Unassigned';
+        if (!studentsByClass[cls]) studentsByClass[cls] = [];
+        studentsByClass[cls].push(s);
+    });
+
+    let classCards = '';
+    Object.keys(studentsByClass).sort().forEach(cls => {
+        const studentsInClass = studentsByClass[cls];
+        classCards += `
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-4">
+                <div class="bg-indigo-50/50 px-6 py-3 border-b border-indigo-100">
+                    <h4 class="font-semibold text-indigo-900">${escapeHtml(cls)} (${studentsInClass.length} students)</h4>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase">
+                                <th class="px-4 py-2">#</th>
+                                <th class="px-4 py-2">Name</th>
+                                <th class="px-4 py-2">ID</th>
+                                <th class="px-4 py-2">Sex</th>
+                                <th class="px-4 py-2">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100 text-sm">
+                            ${studentsInClass.map((student, i) => `
+                                <tr class="hover:bg-indigo-50/30">
+                                    <td class="px-4 py-2 text-gray-500">${i + 1}</td>
+                                    <td class="px-4 py-2 font-medium text-gray-800">${escapeHtml(student.name)}</td>
+                                    <td class="px-4 py-2 font-mono text-xs text-gray-600">${escapeHtml(student.id)}</td>
+                                    <td class="px-4 py-2 text-gray-600">${escapeHtml(student.sex)}</td>
+                                    <td class="px-4 py-2">
+                                        <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                            student.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                                        }">${escapeHtml(student.status || 'Active')}</span>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-xs font-medium uppercase">Total Students</p>
+                    <p class="text-3xl font-bold text-indigo-600 mt-1">${students.length}</p>
+                </div>
+                <i class="fas fa-user-graduate text-4xl text-indigo-100"></i>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-xs font-medium uppercase">Total Teachers</p>
+                    <p class="text-3xl font-bold text-emerald-600 mt-1">${teachers.length}</p>
+                </div>
+                <i class="fas fa-chalkboard-teacher text-4xl text-emerald-100"></i>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-xs font-medium uppercase">Classes</p>
+                    <p class="text-3xl font-bold text-amber-600 mt-1">${classes.length}</p>
+                </div>
+                <i class="fas fa-school text-4xl text-amber-100"></i>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-xs font-medium uppercase">Active Students</p>
+                    <p class="text-3xl font-bold text-purple-600 mt-1">${students.filter(s => s.status !== 'Left').length}</p>
+                </div>
+                <i class="fas fa-user-check text-4xl text-purple-100"></i>
+            </div>
+        </div>
+        
+        <h3 class="text-lg font-bold text-gray-800 mb-4">Students Overview by Class</h3>
+        ${classCards || '<div class="bg-white p-8 rounded-2xl text-center text-gray-400 border border-gray-100">No student records found.</div>'}
+    `;
+}
+
+// ============================================
+// 7. INITIALIZATION LISTENERS
+// ============================================
+document.addEventListener('DOMContentLoaded', () => {
+    setupSidebar();
+    handleInitialRoute();
+});
+
+window.addEventListener('hashchange', () => {
+    const hashRoute = window.location.hash.replace('#', '');
+    if (hashRoute && currentUser) {
+        navigateTo(hashRoute);
+    }
+});
+
+
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const icon = document.getElementById('collapse-icon');
+    if (!sidebar) return;
+
+    const isCollapsed = sidebar.classList.contains('w-20');
+
+    if (isCollapsed) {
+        sidebar.classList.remove('w-20');
+        sidebar.classList.add('w-64');
+        if (icon) icon.className = 'fas fa-chevron-left text-sm';
+    } else {
+        sidebar.classList.remove('w-64');
+        sidebar.classList.add('w-20');
+        if (icon) icon.className = 'fas fa-chevron-right text-sm';
+    }
+
+    // Toggle text visibility when collapsed
+    document.querySelectorAll('#school-name, #school-tagline, .sidebar-text, #user-info').forEach(el => {
+        el.classList.toggle('hidden', !isCollapsed);
+    });
+}
+
 
 // ============================================
 // PHONE FORMATTING FALLBACK
@@ -80,45 +594,6 @@ if (typeof window.formatDate === 'undefined') {
 
 if (typeof window.formatPhoneForDisplay === 'undefined') {
     window.formatPhoneForDisplay = (phone) => phone ? String(phone).trim() : 'N/A';
-}
-
-// ============================================
-// TOAST SYSTEM
-// ============================================
-function showToast(message, type = 'info') {
-    let container = document.getElementById('toast-container');
-    
-    // Auto-create container if missing in DOM so toasts never fail silently
-    if (!container) {
-        container = document.createElement('div');
-        container.id = 'toast-container';
-        container.className = 'fixed bottom-5 right-5 z-50 flex flex-col gap-2';
-        document.body.appendChild(container);
-    }
-    
-    const toast = document.createElement('div');
-    toast.className = `toast ${type} flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-white transition-all duration-300 ${
-        type === 'success' ? 'bg-green-600' :
-        type === 'error' ? 'bg-red-600' :
-        type === 'warning' ? 'bg-amber-500' : 'bg-blue-600'
-    }`;
-    
-    toast.innerHTML = `
-        <i class="fas ${
-            type === 'success' ? 'fa-check-circle' :
-            type === 'error' ? 'fa-exclamation-circle' :
-            type === 'warning' ? 'fa-exclamation-triangle' : 'fa-info-circle'
-        }"></i>
-        <span>${escapeHtml(message)}</span>
-    `;
-    
-    container.appendChild(toast);
-    
-    setTimeout(() => {
-        if (toast.parentNode) {
-            toast.remove();
-        }
-    }, 3000);
 }
 
 const DataService = {
@@ -531,162 +1006,6 @@ function getSchoolSettings() {
     return { ...defaults, ...settings };
 }
 
-// ============================================
-// DASHBOARD
-// ============================================
-function renderDashboard(container) {
-    const students = DataService.get('students');
-    const teachers = DataService.get('teachers');
-    const classes = DataService.get('classes');
-    
-    // Group students by class
-    const studentsByClass = {};
-    students.forEach(s => {
-        const cls = s.class || 'Unassigned';
-        if (!studentsByClass[cls]) studentsByClass[cls] = [];
-        studentsByClass[cls].push(s);
-    });
-    
-    // Sort each class by name
-    Object.keys(studentsByClass).forEach(cls => {
-        studentsByClass[cls].sort((a, b) => a.name.localeCompare(b.name));
-    });
-    
-    const sortedStudents = [...students].sort((a, b) => {
-        if (a.sex !== b.sex) return a.sex === 'Female' ? -1 : 1;
-        return a.name.localeCompare(b.name);
-    });
-    
-    // Build class cards
-    let classCards = '';
-    Object.keys(studentsByClass).sort().forEach(cls => {
-        const studentsInClass = studentsByClass[cls];
-        classCards += `
-            <div class="bg-white rounded-2xl shadow overflow-hidden mb-4">
-                <div class="bg-indigo-50 px-6 py-3 border-b">
-                    <h4 class="font-semibold text-indigo-800">${escapeHtml(cls)} (${studentsInClass.length} students)</h4>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="table w-full border-collapse">
-                        <thead>
-                            <tr class="bg-gray-50 border-b">
-                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">#</th>
-                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Name</th>
-                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">ID</th>
-                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Sex</th>
-                                <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${studentsInClass.map((student, i) => `
-                                <tr class="${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-indigo-50">
-                                    <td class="px-4 py-2 text-sm">${i + 1}</td>
-                                    <td class="px-4 py-2 text-sm font-medium">${escapeHtml(student.name)}</td>
-                                    <td class="px-4 py-2 text-sm font-mono">${escapeHtml(student.id)}</td>
-                                    <td class="px-4 py-2 text-sm">${escapeHtml(student.sex)}</td>
-                                    <td class="px-4 py-2 text-sm">
-                                        <span class="px-2 py-1 ${student.status === 'Active' ? 'bg-green-100 text-green-800' : student.status === 'Transfer' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'} rounded-full text-xs font-semibold">
-                                            ${escapeHtml(student.status || 'Active')}
-                                        </span>
-                                    </td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        `;
-    });
-    
-    container.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <div class="bg-white p-6 rounded-2xl shadow card">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-500 text-sm">Total Students</p>
-                        <p class="text-4xl font-bold text-indigo-600 mt-2">${students.length}</p>
-                    </div>
-                    <i class="fas fa-user-graduate text-5xl text-indigo-100"></i>
-                </div>
-            </div>
-            <div class="bg-white p-6 rounded-2xl shadow card">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-500 text-sm">Total Teachers</p>
-                        <p class="text-4xl font-bold text-emerald-600 mt-2">${teachers.length}</p>
-                    </div>
-                    <i class="fas fa-chalkboard-teacher text-5xl text-emerald-100"></i>
-                </div>
-            </div>
-            <div class="bg-white p-6 rounded-2xl shadow card">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-500 text-sm">Classes</p>
-                        <p class="text-4xl font-bold text-amber-600 mt-2">${classes.length}</p>
-                    </div>
-                    <i class="fas fa-chalkboard text-5xl text-amber-100"></i>
-                </div>
-            </div>
-            <div class="bg-white p-6 rounded-2xl shadow card">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-gray-500 text-sm">Active Students</p>
-                        <p class="text-4xl font-bold text-purple-600 mt-2">${students.filter(s => s.status !== 'Left').length}</p>
-                    </div>
-                    <i class="fas fa-user-check text-5xl text-purple-100"></i>
-                </div>
-            </div>
-        </div>
-        
-        <h3 class="text-lg font-semibold mb-4">Students by Class</h3>
-        ${classCards || '<p class="text-center py-8 text-gray-400">No students yet. Add some!</p>'}
-    `;
-}
-
-// ============================================
-// COMPREHENSIVE REFRESH & ROUTING SYSTEM
-// ============================================
-
-/**
- * Gets the default landing page for the currently logged-in user role
- */
-function getDashboardForRole() {
-    const role = typeof getUserRole === 'function' ? getUserRole() : (currentUser?.role || 'Admin');
-    if (role === 'Admin') return 'dashboard';
-    if (role === 'Teacher') return 'teacher-dashboard';
-    if (role === 'Accountant') return 'accountant-dashboard';
-    return 'dashboard';
-}
-
-/**
- * Role-aware dashboard refresh handler
- */
-function refreshDashboard() {
-    const content = document.getElementById('content');
-    if (!content) return;
-    
-    const targetDashboard = getDashboardForRole();
-    
-    // Set Router state if available
-    if (typeof Router !== 'undefined') {
-        Router.current = targetDashboard;
-    }
-
-    if (targetDashboard === 'teacher-dashboard' && typeof renderTeacherDashboard === 'function') {
-        renderTeacherDashboard(content);
-    } else if (targetDashboard === 'accountant-dashboard' && typeof renderAccountantDashboard === 'function') {
-        renderAccountantDashboard(content);
-    } else if (typeof renderDashboard === 'function') {
-        renderDashboard(content);
-    }
-}
-
-/**
- * Re-renders the current page view with robust fallbacks
- */
-/**
- * Safe Page Content Renderer (Prevents 404 fetch calls)
- */
 function refreshCurrentPage() {
     const container = document.getElementById('content');
     if (!container) return;
@@ -9519,16 +9838,6 @@ function handleAdminProcessRequest(requestId, action) {
 //  UTILITIES & DATA SANITIZATION
 // ============================================================================
 
-/** Safe HTML string escaping to protect against XSS */
-const escapeHtml = (str) => {
-    if (str === null || str === undefined) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-};
 
 /** Sanitizes and formats phone numbers for display */
 const formatPhone = (phone) => {
@@ -9604,54 +9913,6 @@ function seedData() {
     }
 }
 
-// ============================================
-// 1. SIDEBAR TOGGLE & BROWSER STATE
-// ============================================
-function setupSidebar() {
-    const sidebar = document.getElementById("sidebar");
-    const toggleBtn = document.getElementById("sidebar-collapse");
-    const mobileBtn = document.getElementById("header-menu-btn");
-
-    if (!sidebar) return;
-
-    const desktop = window.matchMedia("(min-width:1024px)");
-
-    // Desktop collapse/expand
-    if (toggleBtn) {
-        toggleBtn.addEventListener("click", function() {
-            sidebar.classList.toggle("collapsed");
-            
-            // Update collapse arrow icon
-            const icon = document.getElementById("collapse-icon");
-            if (icon) {
-                icon.className = sidebar.classList.contains("collapsed") 
-                    ? "fas fa-chevron-right text-xs" 
-                    : "fas fa-chevron-left text-xs";
-            }
-            
-            // Save state in browser memory
-            localStorage.setItem("sidebarCollapsed", sidebar.classList.contains("collapsed"));
-        });
-    }
-
-    // Mobile menu toggle
-    if (mobileBtn) {
-        mobileBtn.addEventListener("click", function() {
-            sidebar.classList.toggle("mobile-open");
-        });
-    }
-
-    // Restore saved state when reloading on desktop
-    if (desktop.matches) {
-        if (localStorage.getItem("sidebarCollapsed") === "true") {
-            sidebar.classList.add("collapsed");
-            const icon = document.getElementById("collapse-icon");
-            if (icon) {
-                icon.className = "fas fa-chevron-right text-xs";
-            }
-        }
-    }
-
     // Close mobile sidebar on outside click
     document.addEventListener("click", function(e) {
         if (window.innerWidth < 1024) {
@@ -9669,134 +9930,6 @@ function setupSidebar() {
             sidebar.classList.remove("mobile-open");
         }
     });
-}
-
-// ============================================
-// 2. CLOUD/STATIC ROUTING (HASH-BASED)
-// ============================================
-/**
- * Normalizes module identifiers into clean objects with id, label, icon, and roles
- */
-function normalizeModule(mod) {
-    if (!mod) {
-        return { id: 'dashboard', label: 'Dashboard', icon: 'fa-tachometer-alt', roles: ['Admin', 'Teacher', 'Accountant'] };
-    }
-    
-    if (typeof mod === 'string') {
-        const modules = (typeof APP_MODULES !== 'undefined') ? APP_MODULES : [];
-        const found = modules.find(m => m.id === mod);
-        if (found) return found;
-
-        // Fallback for unconfigured string routes
-        const formattedLabel = mod.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-        return { 
-            id: mod, 
-            label: formattedLabel, 
-            icon: 'fa-folder', 
-            roles: ['Admin', 'Teacher', 'Accountant'] 
-        };
-    }
-    
-    return mod;
-}
-
-let activeModuleId = 'dashboard';
-
-/**
- * Renders and updates the sidebar navigation links based on user role
- */
-function renderSidebar() {
-    const navContainer = document.getElementById('main-nav') || 
-                         document.querySelector('.sidebar-nav') || 
-                         document.getElementById('sidebar-nav');
-
-    if (!navContainer) return;
-
-    const currentRole = getUserRole();
-    const currentRoute = (typeof Router !== 'undefined' && Router.current) ? Router.current : getDashboardForRole();
-
-    // Map and normalize modules
-    const moduleList = APP_MODULES.map(normalizeModule);
-
-    // Filter modules by active role
-    const allowedModules = moduleList.filter(mod => {
-        if (!mod.roles || !Array.isArray(mod.roles)) return true;
-        return mod.roles.includes(currentRole);
-    });
-
-    // Generate Indigo-styled menu items
-    navContainer.innerHTML = allowedModules.map(mod => {
-        const isActive = (mod.id === currentRoute);
-        return `
-            <a href="#${mod.id}" 
-               class="nav-link flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                   isActive 
-                     ? 'bg-indigo-700 text-white font-semibold shadow-sm' 
-                     : 'text-indigo-200 hover:bg-indigo-700/50 hover:text-white'
-               }" 
-               data-page="${mod.id}"
-               onclick="event.preventDefault(); navigateTo('${mod.id}');">
-                <i class="fas ${mod.icon || 'fa-folder'} w-5 text-center text-base"></i>
-                <span class="sidebar-text truncate">${mod.label}</span>
-            </a>
-        `;
-    }).join('');
-}
-
-function navigateTo(moduleId) {
-    const targetModule = APP_MODULES.find(m => m.id === moduleId);
-    if (!targetModule) return;
-
-    activeModuleId = moduleId;
-
-    // Keep Hash URL synced for refresh support on hosted environments
-    if (window.location.hash !== `#${moduleId}`) {
-        window.location.hash = moduleId;
-    }
-
-    renderSidebar();
-
-    const mainContainer = document.getElementById('main-content');
-    if (mainContainer && typeof targetModule.render === 'function') {
-        mainContainer.innerHTML = '';
-        targetModule.render(mainContainer);
-    }
-}
-
-function toggleSidebar() {
-    const sidebar = document.getElementById('sidebar');
-    const icon = document.getElementById('collapse-icon');
-    if (!sidebar) return;
-
-    const isCollapsed = sidebar.classList.contains('w-20');
-
-    if (isCollapsed) {
-        sidebar.classList.remove('w-20');
-        sidebar.classList.add('w-64');
-        if (icon) icon.className = 'fas fa-chevron-left text-sm';
-    } else {
-        sidebar.classList.remove('w-64');
-        sidebar.classList.add('w-20');
-        if (icon) icon.className = 'fas fa-chevron-right text-sm';
-    }
-
-    // Toggle text visibility when collapsed
-    document.querySelectorAll('#school-name, #school-tagline, .sidebar-text, #user-info').forEach(el => {
-        el.classList.toggle('hidden', !isCollapsed);
-    });
-}
-
-
-
-// ============================================
-// 3. EVENT LISTENERS SETUP
-// ============================================
-document.addEventListener('DOMContentLoaded', () => {
-    setupSidebar();
-    handleInitialRoute();
-});
-
-window.addEventListener('hashchange', handleInitialRoute);
 
 // ============================================
 // COMPLETE APP INITIALIZATION & AUTH SYSTEM
@@ -9824,225 +9957,11 @@ function hideLoadingSpinner() {
 }
 
 let currentUser = null;
-
-/**
- * Main application initializer - transitions UI from Login view to Main App view
- */
-function initApp() {
-    // 1. Hide Login Screen / Modal / Form Container
-    const loginContainers = document.querySelectorAll('#login-screen, #login-modal, #login-container, .login-wrapper');
-    loginContainers.forEach(el => {
-        el.style.display = 'none';
-        el.classList.add('hidden');
-    });
-
-    // 2. Show Main App Layout Container & Sidebar
-    const appContainers = document.querySelectorAll('#app-layout, #main-layout, #app-container, .app-wrapper, #sidebar');
-    appContainers.forEach(el => {
-        el.style.display = '';
-        el.classList.remove('hidden');
-    });
-
-    // 3. Render Sidebar items dynamically for logged-in user
-    renderSidebar();
-
-    // 4. Update Header Profile & User Info
-    if (typeof updateUserProfile === 'function') {
-        updateUserProfile();
-    }
-
-    // 5. Dismiss all spinning indicators
-    hideLoadingSpinner();
-}
-
-/**
- * Show Fullscreen Login Page
- */
-function showLoginPage() {
-    document.body.innerHTML = `
-        <div class="min-h-screen bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
-                <div class="text-center mb-8">
-                    <h1 class="text-2xl font-bold text-gray-800">Bandawe Girls Secondary School</h1>
-                    <p class="text-gray-500 text-sm">Information Management System</p>
-                    <div class="border-t border-gray-200 my-4"></div>
-                    <p class="text-gray-600 font-semibold">Login to continue</p>
-                </div>
-                
-                <form id="loginForm">
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Username or Email</label>
-                            <input type="text" id="login-username" required 
-                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                   placeholder="Enter your username or email">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                            <input type="password" id="login-password" required 
-                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                   placeholder="Enter your password">
-                        </div>
-                    </div>
-                    
-                    <div id="login-error" class="mt-3 text-red-600 text-sm hidden"></div>
-                    
-                    <button type="submit" id="btn-login-submit"
-                            class="mt-6 w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition font-semibold flex items-center justify-center">
-                        <i class="fas fa-sign-in-alt mr-2"></i> <span>Login</span>
-                    </button>
-                </form>
-                
-                <div class="mt-6 text-center text-xs text-gray-400">
-                    <p>Demo Admin: admin@school.com | password: admin123</p>
-                    <p class="mt-1">Demo Teacher: teacher@school.com | password: teacher123</p>
-                </div>
-            </div>
-        </div>
-    `;
     
-    const loginForm = document.getElementById('loginForm');
-    if (loginForm) {
-        loginForm.onsubmit = function(e) {
-            e.preventDefault();
-            loginUser();
-        };
-    }
-}
+
 
 function renderLoginForm() {
     showLoginPage();
-}
-
-async function loginUser(event) {
-    if (event) event.preventDefault();
-
-    const loginBtn = document.getElementById('login-btn') || document.querySelector('button[type="submit"]');
-    const originalText = loginBtn ? loginBtn.innerHTML : 'Login';
-
-    if (loginBtn) {
-        loginBtn.disabled = true;
-        loginBtn.dataset.originalText = originalText;
-        loginBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i> Authenticating...`;
-    }
-
-    try {
-        const identifierInput = (
-            document.getElementById('login-username')?.value || 
-            document.getElementById('email')?.value || ''
-        ).trim();
-
-        const passwordInput = (
-            document.getElementById('login-password')?.value || 
-            document.getElementById('password')?.value || ''
-        ).trim();
-
-        if (!identifierInput || !passwordInput) {
-            showToast('Please enter both username/email and password.', 'error');
-            hideLoadingSpinner();
-            return;
-        }
-
-        const users = DataService.get('users') || [];
-        const matchedUser = users.find(u => 
-            (u.username && u.username.toLowerCase() === identifierInput.toLowerCase()) || 
-            (u.email && u.email.toLowerCase() === identifierInput.toLowerCase())
-        );
-
-        let targetEmail = identifierInput;
-        if (matchedUser && matchedUser.email) {
-            targetEmail = matchedUser.email;
-        } else if (!identifierInput.includes('@')) {
-            targetEmail = `${identifierInput.toLowerCase()}@school.com`;
-        }
-
-        let authenticatedUser = null;
-
-        // Firebase Login Attempt
-        try {
-            let userCredential = null;
-            if (window.firebaseAuth && window.signInWithEmailAndPassword) {
-                userCredential = await window.signInWithEmailAndPassword(window.firebaseAuth, targetEmail, passwordInput);
-            } else if (typeof firebase !== 'undefined' && firebase.auth) {
-                userCredential = await firebase.auth().signInWithEmailAndPassword(targetEmail, passwordInput);
-            }
-
-            if (userCredential) {
-                authenticatedUser = matchedUser || {
-                    uid: userCredential.user.uid,
-                    username: identifierInput,
-                    email: userCredential.user.email,
-                    role: 'Teacher'
-                };
-            }
-        } catch (fbErr) {
-            console.warn("Firebase Auth bypassed; verifying via local database.");
-        }
-
-        // Fallback Local Database Verification
-        if (!authenticatedUser && matchedUser && matchedUser.password === passwordInput) {
-            authenticatedUser = matchedUser;
-        }
-
-        if (authenticatedUser) {
-            window.currentUser = authenticatedUser;
-            localStorage.setItem('currentUser', JSON.stringify(authenticatedUser));
-
-            showToast('Logged in successfully!', 'success');
-            initApp();
-            navigateTo(getDashboardForRole());
-            return;
-        }
-
-        showToast('Invalid username/email or password.', 'error');
-        hideLoadingSpinner();
-
-    } catch (err) {
-        console.error("Login error:", err);
-        showToast('Authentication failed. Please try again.', 'error');
-        hideLoadingSpinner();
-    }
-}
-
-/**
- * Logout Handlers
- */
-function handleLogout() {
-    window.currentUser = null;
-    currentUser = null;
-    localStorage.removeItem('currentUser');
-
-    if (typeof auth !== 'undefined' && auth && typeof auth.signOut === 'function') {
-        auth.signOut().catch(() => {});
-    }
-
-    showToast('Logged out successfully', 'info');
-
-    if (typeof showLoginPage === 'function') {
-        showLoginPage();
-    } else {
-        window.location.reload();
-    }
-}
-window.logoutUser = handleLogout; // Global alias fallback
-
-
-/**
- * Update Sidebar & Top Header Profile Info
- */
-function updateUserProfile() {
-    const user = window.currentUser || JSON.parse(localStorage.getItem('currentUser') || '{}');
-    
-    const nameEls = document.querySelectorAll('#user-name, .user-display-name');
-    const roleEls = document.querySelectorAll('#user-role, .user-display-role');
-
-    nameEls.forEach(el => {
-        el.textContent = user.fullName || user.username || 'Guest';
-    });
-
-    roleEls.forEach(el => {
-        el.textContent = user.role || 'Not logged in';
-    });
 }
 
 /**
@@ -10077,67 +9996,6 @@ function requireAuth() {
         return false;
     }
     return true;
-}
-
-/**
- * DOM Loaded & Auth Observer Entry Points
- */
-// ============================================
-// INITIALIZATION & ROUTE HANDLERS
-// ============================================
-
-/**
- * Handles initial page load, session hydration, and role-aware routing
- */
-function handleInitialRoute() {
-    // 1. Hydrate user session from localStorage if memory state was reset
-    if (!currentUser) {
-        const savedUser = localStorage.getItem('currentUser');
-        if (savedUser) {
-            try {
-                currentUser = JSON.parse(savedUser);
-                window.currentUser = currentUser;
-            } catch (e) {
-                console.error("Error parsing saved session user:", e);
-                localStorage.removeItem('currentUser');
-            }
-        }
-    }
-
-    // 2. Unauthenticated check -> redirect to login
-    const hasFirebaseUser = typeof window.firebaseAuth !== 'undefined' && window.firebaseAuth.currentUser;
-    if (!currentUser && !hasFirebaseUser) {
-        if (typeof showLoginPage === 'function') {
-            showLoginPage();
-        }
-        return;
-    }
-
-    // 3. Resolve target module route from URL hash or role default
-    const hash = window.location.hash.replace('#', '');
-    const modules = (typeof APP_MODULES !== 'undefined') ? APP_MODULES : [];
-    const validModule = modules.find(m => m.id === hash);
-
-    const defaultDashboard = (typeof getDashboardForRole === 'function') 
-        ? getDashboardForRole() 
-        : 'dashboard';
-
-    const targetModule = validModule ? validModule.id : defaultDashboard;
-
-    // 4. Navigate to initial module
-    if (typeof navigateTo === 'function') {
-        navigateTo(targetModule);
-    } else if (typeof Router !== 'undefined' && typeof Router.navigate === 'function') {
-        Router.navigate(targetModule);
-    }
-
-    // 5. Sync UI states, sidebar buttons, and profile header
-    if (typeof refreshApp === 'function') {
-        refreshApp();
-    } else {
-        if (typeof renderSidebar === 'function') renderSidebar();
-        if (typeof updateUserProfile === 'function') updateUserProfile();
-    }
 }
 
 // Single, clean DOMContentLoaded Event Listener
