@@ -8865,32 +8865,15 @@ function togglePortal() {
     refreshAdminPortalUI();
 }
 
-function savePortalSettings() {
-    let settings = DataService.get('portalSettings') || {
-        isOpen: false,
-        openingDate: null,
-        closingDate: null,
-        message: 'Results will be available soon.'
-    };
-    
-    const openingDate = document.getElementById('portal-opening-date')?.value || null;
-    const closingDate = document.getElementById('portal-closing-date')?.value || null;
-    const message = document.getElementById('portal-message')?.value.trim() || 'Results will be available soon.';
-    
-    settings.openingDate = openingDate;
-    settings.closingDate = closingDate;
-    settings.message = message;
-    
-    // Save to both DataService and raw localStorage
-    DataService.set('portalSettings', settings);
-    localStorage.setItem('portalSettings', JSON.stringify(settings));
-    
-    showToast('Portal settings saved successfully!', 'success');
-    
-    closeModal();
-    
-    // Refresh admin UI dynamically
-    refreshAdminPortalUI();
+// Firestore example in script.js
+function savePortalSettingsToFirebase(settings) {
+    db.collection('settings').doc('portalSettings').set(settings)
+        .then(() => {
+            showToast('Portal updated live on all devices!', 'success');
+        })
+        .catch((error) => {
+            console.error("Error writing to Firebase:", error);
+        });
 }
 
 function refreshAdminPortalUI() {

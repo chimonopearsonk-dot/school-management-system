@@ -49,16 +49,17 @@
 </head>
 <body class="bg-gray-100 min-h-screen">
     <!-- Header -->
-    <header class="bg-indigo-800 text-white shadow-lg no-print">
-        <div class="max-w-4xl mx-auto px-4 py-4">
-            <div class="w-12 h-12 bg-indigo-700/60 rounded-full flex items-center justify-center text-2xl mb-1"></div>
-                <div>
-                    <h1 class="text-2xl font-bold">Results Portal</h1>
-                    <p class="text-sm text-indigo-300">Bandawe Girls Secondary School</p>
-                </div>
-            </div>
+<header class="bg-indigo-800 text-white shadow-lg no-print mb-8">
+    <div class="max-w-4xl mx-auto px-4 py-6 flex flex-col items-center text-center">
+        <div class="w-12 h-12 bg-indigo-700/60 rounded-full flex items-center justify-center text-2xl mb-2">
+            📄
         </div>
-    </header>
+        <div>
+            <h1 class="text-2xl font-bold">Results Portal</h1>
+            <p class="text-sm text-indigo-300">Bandawe Girls Secondary School</p>
+        </div>
+    </div>
+</header>
 
     <!-- Main Content -->
     <div class="max-w-4xl mx-auto px-4 py-8">
@@ -155,73 +156,86 @@ function escapeHtml(text) {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
 }
- // Load and display portal status
-function loadPortalStatus() {
+ // Listen to live Firebase Firestore updates across all devices
+function listenToPortalStatus() {
     try {
-        var rawSettings = localStorage.getItem('portalSettings');
-        var settings = rawSettings ? JSON.parse(rawSettings) : {
-            isOpen: false,
-            openingDate: null,
-            closingDate: null,
-            message: 'Results will be available soon.'
-        };
-
-        var statusDiv = document.getElementById('portal-status');
-        var accessForm = document.getElementById('access-form');
-
-        if (!statusDiv) return;
-
-        if (settings.isOpen) {
-            var closingInfo = settings.closingDate 
-                ? '<p class="text-xs mt-1 text-gray-500">Portal closes: ' + formatDate(settings.closingDate) + '</p>' 
-                : '';
-
-            statusDiv.innerHTML = 
-                '<div class="bg-green-50 border border-green-200 rounded-xl p-4 text-green-700 shadow-sm">' +
-                    '<p class="font-semibold text-base">✅ Results Portal is OPEN</p>' +
-                    '<p class="text-sm mt-1">' + (escapeHtml(settings.message) || 'Enter your details to view your results.') + '</p>' +
-                    closingInfo +
-                '</div>';
-
-            if (accessForm) accessForm.style.display = 'block';
-        } else {
-            var openingInfo = settings.openingDate 
-                ? '<p class="text-xs mt-1 text-gray-500">Portal opens: ' + formatDate(settings.openingDate) + '</p>' 
-                : '';
-
-            statusDiv.innerHTML = 
-                '<div class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 shadow-sm">' +
-                    '<p class="font-semibold text-base">🔒 Results Portal is CLOSED</p>' +
-                    '<p class="text-sm mt-1">' + (escapeHtml(settings.message) || 'Results are not available at this time.') + '</p>' +
-                    openingInfo +
-                '</div>';
-
-            if (accessForm) accessForm.style.display = 'none';
-        }
+        // Replace 'db' with your Firestore database instance
+        db.collection('settings').doc('portalSettings')
+            .onSnapshot(function(doc) {
+                var settings = doc.exists ? doc.data() : {
+                    isOpen: false,
+                    openingDate: null,
+                    closingDate: null,
+                    message: 'Results will be available soon.'
+                };
+                
+                // Cache locally as fallback
+                localStorage.setItem('portalSettings', JSON.stringify(settings));
+                
+                // Render status on UI
+                renderPortalStatusUI(settings);
+            }, function(error) {
+                console.error("Firebase sync error:", error);
+                // Fallback to local storage if offline
+                fallbackLocalStorage();
+            });
     } catch (e) {
-        console.error('Error loading portal status:', e);
+        console.error("Firestore initialization error:", e);
+        fallbackLocalStorage();
     }
 }
 
-// Initialize and setup live-sync triggers
-document.addEventListener('DOMContentLoaded', function() {
-    loadPortalStatus();
+function renderPortalStatusUI(settings) {
+    var statusDiv = document.getElementById('portal-status');
+    var accessForm = document.getElementById('access-form');
 
-    var loginForm = document.getElementById('portalLoginForm');
-    if (loginForm) {
-        loginForm.addEventListener('submit', portalLogin);
+    if (!statusDiv) return;
+
+    if (settings.isOpen) {
+        var closingInfo = settings.closingDate 
+            ? '<p class="text-xs mt-1 text-gray-500">Portal closes: ' + formatDate(settings.closingDate) + '</p>' 
+            : '';
+
+        statusDiv.innerHTML = 
+            '<div class="bg-green-50 border border-green-200 rounded-xl p-4 text-green-700 shadow-sm">' +
+                '<p class="font-semibold text-base">✅ Results Portal is OPEN</p>' +
+                '<p class="text-sm mt-1">' + (escapeHtml(settings.message) || 'Enter your details to view your results.') + '</p>' +
+                closingInfo +
+            '</div>';
+
+        if (accessForm) accessForm.style.display = 'block';
+    } else {
+        var openingInfo = settings.openingDate 
+            ? '<p class="text-xs mt-1 text-gray-500">Portal opens: ' + formatDate(settings.openingDate) + '</p>' 
+            : '';
+
+        statusDiv.innerHTML = 
+            '<div class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 shadow-sm">' +
+                '<p class="font-semibold text-base">🔒 Results Portal is CLOSED</p>' +
+                '<p class="text-sm mt-1">' + (escapeHtml(settings.message) || 'Results are not available at this time.') + '</p>' +
+                openingInfo +
+            '</div>';
+
+        if (accessForm) accessForm.style.display = 'none';
     }
+}
 
-    // Auto-refresh status if changed in another window/tab
-    window.addEventListener('storage', function(e) {
-        if (e.key === 'portalSettings') {
-            loadPortalStatus();
-        }
-    });
+function fallbackLocalStorage() {
+    var rawSettings = localStorage.getItem('portalSettings');
+    var settings = rawSettings ? JSON.parse(rawSettings) : {
+        isOpen: false,
+        openingDate: null,
+        closingDate: null,
+        message: 'Results will be available soon.'
+    };
+    renderPortalStatusUI(settings);
+}
 
-    // Check every 5 seconds for background changes
-    setInterval(loadPortalStatus, 5000);
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    listenToPortalStatus();
 });
+
 
         function showToast(message, type) {
             if (!type) type = 'info';
