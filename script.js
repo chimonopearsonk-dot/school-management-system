@@ -288,6 +288,8 @@ function navigateTo(moduleId) {
     // Specific Module Aliases (Maps 'settings' -> 'renderSchoolSettings')
     if (targetModule.id === 'settings' || targetModule.id === 'school-settings') {
         fnName = 'renderSchoolSettings';
+        } else if (['requests', 'phone-requests', 'request-center', 'phone_requests'].includes(targetModule.id)) {
+        fnName = 'renderRequestCenter';
     }
 
     // Execute Module Render Function
@@ -10144,7 +10146,12 @@ if (typeof auth !== 'undefined' && auth) {
 window.addEventListener('DOMContentLoaded', handleInitialRoute);
 window.addEventListener('hashchange', handleInitialRoute);
 
-// Global scope exports for console debugging and HTML handlers
+// Global scope exports for console debugging and HTML 
+window.renderRequestCenter = renderRequestCenter;
+window.renderRequests = renderRequestCenter;
+window.handleAdminProcessRequest = handleAdminProcessRequest;
+window.getPhoneRequests = getPhoneRequests;
+window.processPhoneRequest = processPhoneRequest;
 window.renderSchoolSettings = renderSchoolSettings;
 window.renderSettings = renderSchoolSettings;
 window.showSchoolSettings = showSchoolSettings;
