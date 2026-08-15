@@ -46,8 +46,11 @@ const APP_MODULES = [
     { id: 'requests', label: 'Requests & Leave', icon: 'fa-envelope-open-text', roles: ['Admin', 'Teacher'] }
 ];
 
-let currentUser = null;
 let activeModuleId = 'dashboard';
+// ✅ SAFE AGAINST RE-DECLARATION
+if (typeof window.currentUser === 'undefined') {
+    window.currentUser = null;
+}
 
 // ============================================
 // 2. DATA SERVICES & INITIAL SEEDING
