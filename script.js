@@ -684,32 +684,46 @@ function refreshDashboard() {
 /**
  * Re-renders the current page view with robust fallbacks
  */
+/**
+ * Safe Page Content Renderer (Prevents 404 fetch calls)
+ */
 function refreshCurrentPage() {
     const container = document.getElementById('content');
     if (!container) return;
 
-    // Ensure we have a valid current route; if missing, fallback to user's role dashboard
-    if (typeof Router !== 'undefined') {
-        if (!Router.current || !Router.pages || !Router.pages[Router.current]) {
-            Router.current = getDashboardForRole();
-        }
+    let targetRoute = (typeof Router !== 'undefined' && Router.current) ? Router.current : getDashboardForRole();
 
-        const page = Router.pages[Router.current];
-        if (page && typeof page.render === 'function') {
+    // Check if custom page renderer exists
+    if (typeof Router !== 'undefined' && Router.pages && Router.pages[targetRoute]) {
+        const page = Router.pages[targetRoute];
+        if (typeof page.render === 'function') {
             page.render(container);
-        } else if (typeof Router.navigate === 'function') {
-            Router.navigate(Router.current);
-            return;
-        } else {
-            refreshDashboard();
+            refreshUIState();
             return;
         }
-    } else {
-        refreshDashboard();
-        return;
     }
 
-    // Refresh UI elements (headers, sidebar, permissions)
+    // Direct JS view renderers
+    if (targetRoute === 'teacher-dashboard' && typeof renderTeacherDashboard === 'function') {
+        renderTeacherDashboard(container);
+    } else if (targetRoute === 'accountant-dashboard' && typeof renderAccountantDashboard === 'function') {
+        renderAccountantDashboard(container);
+    } else if (typeof renderDashboard === 'function') {
+        renderDashboard(container);
+    } else {
+        // Fallback view for routes without a dedicated function
+        const mod = normalizeModule(targetRoute);
+        container.innerHTML = `
+            <div class="bg-white p-8 rounded-xl border border-gray-200 shadow-sm text-center">
+                <div class="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                    <i class="fas ${mod.icon}"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-2">${mod.label}</h2>
+                <p class="text-gray-500 text-sm">Module view loaded successfully.</p>
+            </div>
+        `;
+    }
+
     refreshUIState();
 }
 
@@ -9666,48 +9680,39 @@ let activeModuleId = 'dashboard';
  * Renders and updates the sidebar navigation links based on user role
  */
 function renderSidebar() {
-    const sidebarNav = document.getElementById('sidebar-nav') || 
-                       document.getElementById('sidebar-menu') || 
-                       document.querySelector('.sidebar-nav') ||
-                       document.querySelector('#sidebar ul');
+    const navContainer = document.getElementById('main-nav') || 
+                         document.querySelector('.sidebar-nav') || 
+                         document.getElementById('sidebar-nav');
 
-    if (!sidebarNav) return;
+    if (!navContainer) return;
 
-    const currentRole = typeof getUserRole === 'function' ? getUserRole() : (currentUser?.role || 'Admin');
+    const currentRole = getUserRole();
     const currentRoute = (typeof Router !== 'undefined' && Router.current) ? Router.current : getDashboardForRole();
 
-    // Default module list if APP_MODULES is not globally accessible
-    const modules = (typeof APP_MODULES !== 'undefined' && Array.isArray(APP_MODULES)) ? APP_MODULES : [
-        { id: 'dashboard', label: 'Dashboard', icon: 'fa-tachometer-alt', roles: ['Admin', 'Teacher', 'Accountant'] },
-        { id: 'teacher-dashboard', label: 'Teacher Portal', icon: 'fa-chalkboard-teacher', roles: ['Teacher'] },
-        { id: 'accountant-dashboard', label: 'Finance Portal', icon: 'fa-calculator', roles: ['Accountant'] },
-        { id: 'students', label: 'Students', icon: 'fa-user-graduate', roles: ['Admin', 'Teacher'] },
-        { id: 'teachers', label: 'Teachers', icon: 'fa-users', roles: ['Admin'] },
-        { id: 'academics', label: 'Academics', icon: 'fa-book', roles: ['Admin', 'Teacher'] },
-        { id: 'finance', label: 'Finance', icon: 'fa-wallet', roles: ['Admin', 'Accountant'] },
-        { id: 'users', label: 'User Management', icon: 'fa-user-cog', roles: ['Admin'] },
-        { id: 'settings', label: 'Settings', icon: 'fa-cog', roles: ['Admin'] }
-    ];
+    // Map and normalize modules
+    const moduleList = APP_MODULES.map(normalizeModule);
 
-    // Filter modules based on user role
-    const allowedModules = modules.filter(mod => {
-        if (!mod.roles) return true;
+    // Filter modules by active role
+    const allowedModules = moduleList.filter(mod => {
+        if (!mod.roles || !Array.isArray(mod.roles)) return true;
         return mod.roles.includes(currentRole);
     });
 
-    // Generate Sidebar Links HTML
-    sidebarNav.innerHTML = allowedModules.map(mod => {
-        const isActive = (mod.id === currentRoute || (mod.id === 'dashboard' && currentRoute.includes('dashboard')));
+    // Generate Indigo-styled menu items
+    navContainer.innerHTML = allowedModules.map(mod => {
+        const isActive = (mod.id === currentRoute);
         return `
-            <li class="nav-item">
-                <a href="#${mod.id}" 
-                   class="nav-link ${isActive ? 'active' : ''}" 
-                   data-page="${mod.id}"
-                   onclick="event.preventDefault(); navigateTo('${mod.id}');">
-                    <i class="fas ${mod.icon || 'fa-folder'} nav-icon mr-2"></i>
-                    <span>${mod.label}</span>
-                </a>
-            </li>
+            <a href="#${mod.id}" 
+               class="nav-link flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                   isActive 
+                     ? 'bg-indigo-700 text-white font-semibold shadow-sm' 
+                     : 'text-indigo-200 hover:bg-indigo-700/50 hover:text-white'
+               }" 
+               data-page="${mod.id}"
+               onclick="event.preventDefault(); navigateTo('${mod.id}');">
+                <i class="fas ${mod.icon || 'fa-folder'} w-5 text-center text-base"></i>
+                <span class="sidebar-text truncate">${mod.label}</span>
+            </a>
         `;
     }).join('');
 }
@@ -9732,13 +9737,30 @@ function navigateTo(moduleId) {
     }
 }
 
-function handleInitialRoute() {
-    const hash = window.location.hash.replace('#', '');
-    const validModule = APP_MODULES.find(m => m.id === hash);
-    const initialModule = validModule ? validModule.id : 'dashboard';
-    
-    navigateTo(initialModule);
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const icon = document.getElementById('collapse-icon');
+    if (!sidebar) return;
+
+    const isCollapsed = sidebar.classList.contains('w-20');
+
+    if (isCollapsed) {
+        sidebar.classList.remove('w-20');
+        sidebar.classList.add('w-64');
+        if (icon) icon.className = 'fas fa-chevron-left text-sm';
+    } else {
+        sidebar.classList.remove('w-64');
+        sidebar.classList.add('w-20');
+        if (icon) icon.className = 'fas fa-chevron-right text-sm';
+    }
+
+    // Toggle text visibility when collapsed
+    document.querySelectorAll('#school-name, #school-tagline, .sidebar-text, #user-info').forEach(el => {
+        el.classList.toggle('hidden', !isCollapsed);
+    });
 }
+
+
 
 // ============================================
 // 3. EVENT LISTENERS SETUP
@@ -9959,45 +9981,42 @@ async function loginUser(event) {
 /**
  * Logout Handlers
  */
-async function logoutUser() {
-    if (confirm('Are you sure you want to logout?')) {
-        try {
-            if (typeof auth !== 'undefined' && auth) await auth.signOut();
-        } catch (e) {
-            console.error("Logout Error:", e);
-        }
-        currentUser = null;
-        localStorage.removeItem('currentUser');
+function handleLogout() {
+    window.currentUser = null;
+    currentUser = null;
+    localStorage.removeItem('currentUser');
+
+    if (typeof auth !== 'undefined' && auth && typeof auth.signOut === 'function') {
+        auth.signOut().catch(() => {});
+    }
+
+    showToast('Logged out successfully', 'info');
+
+    if (typeof showLoginPage === 'function') {
+        showLoginPage();
+    } else {
         window.location.reload();
     }
 }
+window.logoutUser = handleLogout; // Global alias fallback
 
-function handleLogout() {
-    logoutUser();
-}
 
 /**
  * Update Sidebar & Top Header Profile Info
  */
 function updateUserProfile() {
-    if (!currentUser) return;
+    const user = window.currentUser || JSON.parse(localStorage.getItem('currentUser') || '{}');
+    
+    const nameEls = document.querySelectorAll('#user-name, .user-display-name');
+    const roleEls = document.querySelectorAll('#user-role, .user-display-role');
 
-    const nameEl = document.getElementById('user-name');
-    const roleEl = document.getElementById('user-role');
-    if (nameEl) nameEl.textContent = currentUser.fullName || currentUser.username || 'User';
-    if (roleEl) roleEl.textContent = currentUser.role || 'Member';
+    nameEls.forEach(el => {
+        el.textContent = user.fullName || user.username || 'Guest';
+    });
 
-    const headerInfoEl = document.getElementById('user-header-info');
-    if (headerInfoEl) {
-        headerInfoEl.innerHTML = `
-            <div class="flex items-center gap-3">
-                <span class="text-sm font-medium text-gray-700 hidden sm:inline-block">${currentUser.email}</span>
-                <button onclick="handleLogout()" class="text-gray-500 hover:text-red-600 transition p-1" title="Logout">
-                    <i class="fas fa-sign-out-alt text-lg"></i>
-                </button>
-            </div>
-        `;
-    }
+    roleEls.forEach(el => {
+        el.textContent = user.role || 'Not logged in';
+    });
 }
 
 /**
@@ -10042,10 +10061,10 @@ function requireAuth() {
 // ============================================
 
 /**
- * Handles initial page load and hash changes (F5 / Back / Forward)
+ * Handles initial page load, session hydration, and role-aware routing
  */
 function handleInitialRoute() {
-    // 1. Ensure user session is hydrated from localStorage if memory state was cleared by refresh
+    // 1. Hydrate user session from localStorage if memory state was reset
     if (!currentUser) {
         const savedUser = localStorage.getItem('currentUser');
         if (savedUser) {
@@ -10054,33 +10073,44 @@ function handleInitialRoute() {
                 window.currentUser = currentUser;
             } catch (e) {
                 console.error("Error parsing saved session user:", e);
+                localStorage.removeItem('currentUser');
             }
         }
     }
 
-    // 2. If no user is logged in, show login page
-    if (!currentUser && (!window.firebaseAuth || !window.firebaseAuth.currentUser)) {
-        if (typeof showLoginPage === 'function') showLoginPage();
+    // 2. Unauthenticated check -> redirect to login
+    const hasFirebaseUser = typeof window.firebaseAuth !== 'undefined' && window.firebaseAuth.currentUser;
+    if (!currentUser && !hasFirebaseUser) {
+        if (typeof showLoginPage === 'function') {
+            showLoginPage();
+        }
         return;
     }
 
-    // 3. Resolve target module route
+    // 3. Resolve target module route from URL hash or role default
     const hash = window.location.hash.replace('#', '');
-    const validModule = (typeof APP_MODULES !== 'undefined') ? APP_MODULES.find(m => m.id === hash) : null;
+    const modules = (typeof APP_MODULES !== 'undefined') ? APP_MODULES : [];
+    const validModule = modules.find(m => m.id === hash);
 
-    // Fall back to role-specific dashboard (NOT hardcoded 'dashboard')
-    const targetModule = validModule ? validModule.id : getDashboardForRole();
+    const defaultDashboard = (typeof getDashboardForRole === 'function') 
+        ? getDashboardForRole() 
+        : 'dashboard';
 
-    // 4. Navigate and run full app refresh
+    const targetModule = validModule ? validModule.id : defaultDashboard;
+
+    // 4. Navigate to initial module
     if (typeof navigateTo === 'function') {
         navigateTo(targetModule);
     } else if (typeof Router !== 'undefined' && typeof Router.navigate === 'function') {
         Router.navigate(targetModule);
     }
 
-    // 5. Sync UI states, user profiles, and navigation links
+    // 5. Sync UI states, sidebar buttons, and profile header
     if (typeof refreshApp === 'function') {
         refreshApp();
+    } else {
+        if (typeof renderSidebar === 'function') renderSidebar();
+        if (typeof updateUserProfile === 'function') updateUserProfile();
     }
 }
 
