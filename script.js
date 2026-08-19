@@ -1494,12 +1494,73 @@ function sortStudentCohort(studentList) {
 }
 
 // ============================================================================
-// VIEWS & RENDERING COMPONENTS
+// 5. VIEWS & RENDERING COMPONENTS
 // ============================================================================
 
 /**
- * Real-time Firestore Listener: Keeps DataService cache continuously updated
- * and automatically re-renders active DOM containers (Registry & Dashboard).
+ * Manual Refresh Trigger: Fetches fresh data directly from Firestore
+ * and synchronizes both Student Registry and Dashboard tables simultaneously.
+ */
+async function refreshStudentRegistry() {
+    const refreshBtn = document.getElementById('refresh-students-btn');
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-1"></i> Refreshing...`;
+    }
+
+    try {
+        let cloudStudents = [];
+        if (typeof db !== 'undefined' && db) {
+            const snapshot = await db.collection('students').get();
+            snapshot.forEach(doc => {
+                if (doc.exists) cloudStudents.push(doc.data());
+            });
+        } else if (typeof DataService !== 'undefined' && DataService.getStudents) {
+            cloudStudents = await DataService.getStudents();
+        }
+
+        const sortedStudents = sortStudentCohort(cloudStudents);
+
+        // Update local memory cache
+        if (typeof DataService !== 'undefined' && DataService.set) {
+            DataService.set('students', sortedStudents);
+        }
+
+        // Re-render Registry Table
+        const registryContainer = document.getElementById('student-registry-container') || 
+                                  document.getElementById('main-content') || 
+                                  document.getElementById('content');
+        if (registryContainer) {
+            renderStudentRegistry(registryContainer, sortedStudents);
+        }
+
+        // Re-render Dashboard Recent Table
+        const dashboardContainer = document.getElementById('recent-students-container') || 
+                                   document.getElementById('recent-students-list');
+        if (dashboardContainer) {
+            dashboardContainer.innerHTML = createRecentStudentsTable(sortedStudents.slice(0, 5));
+        }
+
+        if (typeof showToast === 'function') {
+            showToast('Student registry refreshed from cloud!', 'success');
+        }
+    } catch (error) {
+        console.error('Failed to refresh student registry:', error);
+        if (typeof showToast === 'function') {
+            showToast('Failed to refresh data: ' + error.message, 'error');
+        }
+    } finally {
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.innerHTML = `<i class="fas fa-sync-alt mr-1"></i> Refresh`;
+        }
+    }
+}
+window.refreshStudentRegistry = refreshStudentRegistry;
+
+/**
+ * Real-time Firestore Listener: Keeps DataService cache updated
+ * and triggers instant UI sync across all active views.
  */
 function listenToStudentRegistry(containerId = 'main-content') {
     if (typeof db === 'undefined' || !db) return;
@@ -1512,21 +1573,27 @@ function listenToStudentRegistry(containerId = 'main-content') {
             }
         });
 
-        // 1. Instantly update local DataService cache with cohort sorting
         const sortedStudents = sortStudentCohort(cloudStudents);
+
+        // 1. Instantly update local DataService cache
         if (typeof DataService !== 'undefined' && DataService.set) {
             DataService.set('students', sortedStudents);
         }
 
-        // 2. Re-render Student Registry if active in DOM
-        const registryContainer = document.getElementById(containerId) || 
-                                  document.getElementById('student-registry-container') || 
+        // 2. Re-render Registry if active in DOM
+        const registryContainer = document.getElementById('student-registry-container') || 
+                                  document.getElementById(containerId) || 
                                   document.getElementById('content');
-        if (registryContainer && registryContainer.querySelector('#student-table-body')) {
+                                  
+        if (registryContainer && (
+            document.getElementById('student-table-body') || 
+            document.getElementById('student-search') ||
+            registryContainer.querySelector('table')
+        )) {
             renderStudentRegistry(registryContainer, sortedStudents);
         }
 
-        // 3. Re-render Dashboard Recent Students Table if active in DOM
+        // 3. Re-render Dashboard if active in DOM
         const dashboardContainer = document.getElementById('recent-students-container') || 
                                    document.getElementById('recent-students-list');
         if (dashboardContainer) {
@@ -1538,7 +1605,7 @@ function listenToStudentRegistry(containerId = 'main-content') {
 }
 
 /**
- * Creates lightweight HTML table snippet for dashboard/recent students component.
+ * Lightweight HTML table snippet for dashboard/recent students component.
  */
 function createRecentStudentsTable(students) {
     if (!students || students.length === 0) {
@@ -1585,15 +1652,18 @@ function createRecentStudentsTable(students) {
 }
 
 /**
- * Primary Student Registry View with unified live data source and filtering.
+ * Primary Student Registry View with unified live data source and manual refresh.
  */
 async function renderStudentRegistry(container, passedStudents = null) {
     if (!container) return;
 
-    // Retrieve data: use passed live snapshot or fetch asynchronously
     let students = passedStudents;
     if (!students) {
-        students = await DataService.getStudents();
+        if (typeof DataService !== 'undefined' && DataService.getStudents) {
+            students = await DataService.getStudents();
+        } else {
+            students = (typeof DataService !== 'undefined' && DataService.get) ? (DataService.get('students') || []) : [];
+        }
     }
 
     const sortedStudents = sortStudentCohort(students || []);
@@ -1635,6 +1705,9 @@ async function renderStudentRegistry(container, passedStudents = null) {
                     </div>
                     
                     <div class="flex gap-2 flex-wrap">
+                        <button id="refresh-students-btn" onclick="refreshStudentRegistry()" class="bg-gray-100 text-gray-700 border border-gray-300 px-3.5 py-2.5 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1.5" title="Refresh data from cloud">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
                         <button onclick="showAddStudentModal()" class="bg-indigo-600 text-white px-4 py-2.5 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
                             <i class="fas fa-plus"></i> Add Student
                         </button>
@@ -1666,9 +1739,9 @@ async function renderStudentRegistry(container, passedStudents = null) {
                     </thead>
                     <tbody id="student-table-body">
                         ${sortedStudents.length === 0 ? `
-                            <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No students found.</td></tr>
+                            <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No students found in registry. Click "+ Add Student" or "Refresh".</td></tr>
                         ` : sortedStudents.map((student, index) => `
-                            <tr class="${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-indigo-50 ${student.status === 'Left' ? 'opacity-60' : ''}" data-id="${escapeHtml(student.id)}" data-status="${escapeHtml(student.status || 'Active')}">
+                            <tr class="${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-indigo-50 ${student.status === 'Left' ? 'opacity-60' : ''}" data-id="${escapeHtml(student.id || '')}" data-status="${escapeHtml(student.status || 'Active')}">
                                 <td class="px-4 py-3 text-sm font-mono">${escapeHtml(student.id || student.studentId || 'N/A')}</td>
                                 <td class="px-4 py-3 text-sm font-medium">${escapeHtml(student.name || student.studentName || '')}</td>
                                 <td class="px-4 py-3 text-sm">
@@ -1720,8 +1793,14 @@ function filterStudentTable() {
     const rows = document.querySelectorAll('#student-table-body tr');
     
     rows.forEach(row => {
+        // Skip filtering if this is an empty placeholder row
+        if (row.cells.length === 1 && row.cells[0].hasAttribute('colspan')) {
+            row.style.display = '';
+            return;
+        }
+
         const text = row.textContent.toLowerCase();
-        const classCell = row.querySelector('td:nth-child(3)')?.textContent.trim() || '';
+        const classCell = row.cells[2]?.textContent.trim() || '';
         const status = row.getAttribute('data-status') || 'Active';
 
         const matchesSearch = !searchTerm || text.includes(searchTerm);
