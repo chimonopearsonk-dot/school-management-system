@@ -2045,32 +2045,94 @@ async function handleSaveStudent(event) {
         return;
     }
 
-    // Use existing ID or generate new standard ID
-    const studentId = studentIdInput?.value?.trim() || DataService.generateId('BAGSS');
+    // Generate standard ID if input is empty
+    const studentId = studentIdInput?.value?.trim() || 
+        (typeof DataService !== 'undefined' && DataService.generateId 
+            ? DataService.generateId('BAGSS') 
+            : 'BAGSS-' + Date.now().toString().slice(-4));
 
     const studentData = {
         id: studentId,
+        studentId: studentId,
         name: nameInput.value.trim(),
         class: classInput.value.trim(),
+        className: classInput.value.trim(),
         parentPhone: phoneInput ? phoneInput.value.trim() : '',
         status: statusInput ? statusInput.value : 'Active',
-        entryDate: new Date().toISOString().split('T')[0]
+        entryDate: new Date().toISOString().split('T')[0],
+        updatedAt: new Date().toISOString()
     };
 
-    // Save directly to Firestore
-    const success = await FirestoreService.saveStudent(studentData);
+    try {
+        // 1. Save directly to Firebase Firestore
+        if (typeof db !== 'undefined' && db) {
+            await db.collection('students').doc(studentData.id).set(studentData, { merge: true });
+        } else if (typeof FirestoreService !== 'undefined' && FirestoreService.saveStudent) {
+            const success = await FirestoreService.saveStudent(studentData);
+            if (!success) throw new Error('FirestoreService failed to save document');
+        } else {
+            throw new Error('Firebase Firestore database object (db) is not defined');
+        }
 
-    if (success) {
-        showToast(`Student ${studentData.name} saved successfully!`, 'success');
-        closeModal();
+        // 2. Update local DataService memory cache so renderStudentRegistry immediately displays it
+        if (typeof DataService !== 'undefined' && DataService.get && DataService.set) {
+            let currentStudents = DataService.get('students') || [];
+            if (!Array.isArray(currentStudents)) currentStudents = [];
+            
+            const existingIndex = currentStudents.findIndex(s => s.id === studentData.id || s.studentId === studentData.id);
+            if (existingIndex >= 0) {
+                currentStudents[existingIndex] = { ...currentStudents[existingIndex], ...studentData };
+            } else {
+                currentStudents.unshift(studentData);
+            }
+            DataService.set('students', currentStudents);
+        }
+
+        showToast(`Student ${studentData.name} saved successfully to cloud!`, 'success');
         
-        // Refresh live UI
-        const container = document.getElementById('main-content') || document.getElementById('student-registry-container');
-        if (container) renderStudentRegistry(container);
-    } else {
-        showToast('Failed to save student to cloud database.', 'error');
+        if (typeof closeModal === 'function') closeModal();
+        
+        // 3. Re-render student table UI
+        const container = document.getElementById('main-content') || 
+                          document.getElementById('content') || 
+                          document.getElementById('student-registry-container');
+                          
+        if (container && typeof renderStudentRegistry === 'function') {
+            renderStudentRegistry(container);
+        }
+    } catch (error) {
+        console.error('Error saving student to Firestore:', error);
+        showToast('Failed to save student: ' + error.message, 'error');
     }
 }
+
+// Automatically sync student registry from Firestore across all devices on load
+function listenToFirestoreStudents() {
+    if (typeof db === 'undefined' || !db.collection) return;
+
+    db.collection('students').onSnapshot((snapshot) => {
+        const cloudStudents = [];
+        snapshot.forEach((doc) => {
+            cloudStudents.push(doc.data());
+        });
+
+        if (typeof DataService !== 'undefined' && DataService.set) {
+            DataService.set('students', cloudStudents);
+        }
+
+        const container = document.getElementById('main-content') || document.getElementById('student-registry-container');
+        if (container && typeof renderStudentRegistry === 'function' && Router?.current === 'students') {
+            renderStudentRegistry(container);
+        }
+    }, (error) => {
+        console.error('Firestore students listener error:', error);
+    });
+}
+
+// Attach listener when app starts
+document.addEventListener('DOMContentLoaded', () => {
+    listenToFirestoreStudents();
+});
 
 // Open Edit Student Modal with Cloud Data
 async function openEditStudentModal(studentId) {
@@ -10093,6 +10155,16 @@ if (typeof auth !== 'undefined' && auth) {
             if (typeof showLoginPage === 'function') showLoginPage();
         }
     });
+}
+
+// Fix missing logoutUser reference
+function logoutUser() {
+    if (typeof logout === 'function') {
+        logout();
+    } else {
+        localStorage.clear();
+        window.location.href = 'index.html';
+    }
 }
 
 // Listen for page refresh and browser history back/forward actions
