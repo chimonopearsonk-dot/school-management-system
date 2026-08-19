@@ -1493,6 +1493,251 @@ function sortStudentCohort(studentList) {
     });
 }
 
+// ============================================================================
+// VIEWS & RENDERING COMPONENTS
+// ============================================================================
+
+/**
+ * Real-time Firestore Listener: Keeps DataService cache continuously updated
+ * and automatically re-renders active DOM containers (Registry & Dashboard).
+ */
+function listenToStudentRegistry(containerId = 'main-content') {
+    if (typeof db === 'undefined' || !db) return;
+
+    db.collection('students').onSnapshot((snapshot) => {
+        const cloudStudents = [];
+        snapshot.forEach(doc => {
+            if (doc.exists) {
+                cloudStudents.push(doc.data());
+            }
+        });
+
+        // 1. Instantly update local DataService cache with cohort sorting
+        const sortedStudents = sortStudentCohort(cloudStudents);
+        if (typeof DataService !== 'undefined' && DataService.set) {
+            DataService.set('students', sortedStudents);
+        }
+
+        // 2. Re-render Student Registry if active in DOM
+        const registryContainer = document.getElementById(containerId) || 
+                                  document.getElementById('student-registry-container') || 
+                                  document.getElementById('content');
+        if (registryContainer && registryContainer.querySelector('#student-table-body')) {
+            renderStudentRegistry(registryContainer, sortedStudents);
+        }
+
+        // 3. Re-render Dashboard Recent Students Table if active in DOM
+        const dashboardContainer = document.getElementById('recent-students-container') || 
+                                   document.getElementById('recent-students-list');
+        if (dashboardContainer) {
+            dashboardContainer.innerHTML = createRecentStudentsTable(sortedStudents.slice(0, 5));
+        }
+    }, (error) => {
+        console.error("Real-time sync error:", error);
+    });
+}
+
+/**
+ * Creates lightweight HTML table snippet for dashboard/recent students component.
+ */
+function createRecentStudentsTable(students) {
+    if (!students || students.length === 0) {
+        return `<div class="p-4 text-center text-gray-500">No recent students found.</div>`;
+    }
+
+    const activeStudents = students.filter(s => s.status !== 'Left');
+
+    return `
+        <div class="table-wrapper border rounded-lg overflow-hidden">
+            <table class="table w-full border-collapse">
+                <thead>
+                    <tr class="bg-indigo-50 border-b-2 border-indigo-200">
+                        <th class="px-4 py-3 text-left text-xs font-semibold text-indigo-800 uppercase tracking-wider border-r border-indigo-100">Name</th>
+                        <th class="px-4 py-3 text-left text-xs font-semibold text-indigo-800 uppercase tracking-wider border-r border-indigo-100">Class</th>
+                        <th class="px-4 py-3 text-left text-xs font-semibold text-indigo-800 uppercase tracking-wider border-r border-indigo-100">Sex</th>
+                        <th class="px-4 py-3 text-left text-xs font-semibold text-indigo-800 uppercase tracking-wider">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${activeStudents.map((student, i) => `
+                        <tr class="${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-indigo-50 transition-colors duration-150">
+                            <td class="px-4 py-3 text-sm text-gray-800 border-r border-gray-100 font-medium">${escapeHtml(student.name || student.studentName || '')}</td>
+                            <td class="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">
+                                <span class="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-semibold">${escapeHtml(student.class || student.className || '')}</span>
+                            </td>
+                            <td class="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">
+                                <span class="${student.sex === 'Female' ? 'text-pink-600' : 'text-blue-600'}">
+                                    <i class="fas ${student.sex === 'Female' ? 'fa-venus' : 'fa-mars'} mr-1"></i>
+                                    ${escapeHtml(student.sex || 'Female')}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3 text-sm">
+                                <span class="px-2 py-0.5 ${student.status === 'Active' ? 'bg-green-100 text-green-800' : student.status === 'Transfer' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'} rounded-full text-xs font-semibold">
+                                    ${escapeHtml(student.status || 'Active')}
+                                </span>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+/**
+ * Primary Student Registry View with unified live data source and filtering.
+ */
+async function renderStudentRegistry(container, passedStudents = null) {
+    if (!container) return;
+
+    // Retrieve data: use passed live snapshot or fetch asynchronously
+    let students = passedStudents;
+    if (!students) {
+        students = await DataService.getStudents();
+    }
+
+    const sortedStudents = sortStudentCohort(students || []);
+    const activeStudents = sortedStudents.filter(s => s.status !== 'Left');
+    const leftStudents = sortedStudents.filter(s => s.status === 'Left');
+    
+    const uniqueClasses = [...new Set(sortedStudents.map(s => s.class || s.className))].filter(Boolean).sort();
+
+    // Preserve existing search & filter states during re-renders
+    const currentSearch = document.getElementById('student-search')?.value || '';
+    const currentClass = document.getElementById('student-class-filter')?.value || '';
+    const currentStatus = document.getElementById('student-status-filter')?.value || 'active';
+
+    container.innerHTML = `
+        <div class="bg-white rounded-2xl shadow">
+            <!-- Header Controls & Actions -->
+            <div class="p-4 border-b">
+                <div class="flex flex-wrap gap-3 items-center justify-between">
+                    <div class="flex flex-wrap gap-3 items-center flex-1">
+                        <div class="flex-1 min-w-[200px]">
+                            <div class="relative">
+                                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                                <input type="text" id="student-search" 
+                                       class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                       placeholder="Search by ID, Name, Class, or Phone..." 
+                                       value="${escapeHtml(currentSearch)}"
+                                       oninput="filterStudentTable()">
+                            </div>
+                        </div>
+                        <select id="student-class-filter" class="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" onchange="filterStudentTable()">
+                            <option value="">All Classes</option>
+                            ${uniqueClasses.map(cls => `<option value="${escapeHtml(cls)}" ${cls === currentClass ? 'selected' : ''}>${escapeHtml(cls)}</option>`).join('')}
+                        </select>
+                        <select id="student-status-filter" class="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" onchange="filterStudentTable()">
+                            <option value="active" ${currentStatus === 'active' ? 'selected' : ''}>Active Only</option>
+                            <option value="left" ${currentStatus === 'left' ? 'selected' : ''}>Left Only</option>
+                            <option value="all" ${currentStatus === 'all' ? 'selected' : ''}>All (including Left)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="showAddStudentModal()" class="bg-indigo-600 text-white px-4 py-2.5 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
+                            <i class="fas fa-plus"></i> Add Student
+                        </button>
+                        <button onclick="showTransferStudentModal()" class="bg-purple-600 text-white px-4 py-2.5 rounded-lg hover:bg-purple-700 flex items-center gap-2">
+                            <i class="fas fa-arrow-right"></i> Transfer In
+                        </button>
+                        <button onclick="showBulkUploadModal()" class="bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 flex items-center gap-2">
+                            <i class="fas fa-upload"></i> Bulk Import
+                        </button>
+                        <button onclick="exportStudentsToCSV()" class="bg-slate-700 text-white px-4 py-2.5 rounded-lg hover:bg-slate-800 flex items-center gap-2" title="Export Register to CSV">
+                            <i class="fas fa-file-excel"></i> Export CSV
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Table Body -->
+            <div class="overflow-x-auto">
+                <table class="table w-full border-collapse">
+                    <thead>
+                        <tr class="bg-gray-50 border-b">
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Student ID</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Full Name</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Class</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Parent Phone</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Status</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="student-table-body">
+                        ${sortedStudents.length === 0 ? `
+                            <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No students found.</td></tr>
+                        ` : sortedStudents.map((student, index) => `
+                            <tr class="${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-indigo-50 ${student.status === 'Left' ? 'opacity-60' : ''}" data-id="${escapeHtml(student.id)}" data-status="${escapeHtml(student.status || 'Active')}">
+                                <td class="px-4 py-3 text-sm font-mono">${escapeHtml(student.id || student.studentId || 'N/A')}</td>
+                                <td class="px-4 py-3 text-sm font-medium">${escapeHtml(student.name || student.studentName || '')}</td>
+                                <td class="px-4 py-3 text-sm">
+                                    <span class="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-semibold">${escapeHtml(student.class || student.className || '')}</span>
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    <span class="font-mono text-sm">${(student.parentPhone || student.phone) ? escapeHtml(formatPhoneForDisplay(student.parentPhone || student.phone)) : 'N/A'}</span>
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    <span class="px-2 py-1 ${student.status === 'Active' ? 'bg-green-100 text-green-800' : student.status === 'Transfer' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'} rounded-full text-xs font-semibold">
+                                        ${escapeHtml(student.status || 'Active')}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    <button onclick="openEditStudentModal('${escapeHtml(student.id)}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Edit Student">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button onclick="openPhoneUpdateModal('${escapeHtml(student.id)}')" class="text-amber-600 hover:text-amber-800 mr-2" title="Update Phone">
+                                        <i class="fas fa-phone"></i>
+                                    </button>
+                                    <button onclick="deleteStudent('${escapeHtml(student.id)}')" class="text-red-600 hover:text-red-800" title="Delete Student">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="p-4 border-t text-sm text-gray-500 flex justify-between">
+                <span>Active Students: ${activeStudents.length}</span>
+                <span>Left: ${leftStudents.length}</span>
+                <span>Total: ${sortedStudents.length}</span>
+            </div>
+        </div>
+    `;
+
+    filterStudentTable();
+}
+
+/**
+ * Filter handler supporting search query, class, and active/left status.
+ */
+function filterStudentTable() {
+    const searchTerm = document.getElementById('student-search')?.value.toLowerCase().trim() || '';
+    const classFilter = document.getElementById('student-class-filter')?.value || '';
+    const statusFilter = document.getElementById('student-status-filter')?.value || 'active';
+    const rows = document.querySelectorAll('#student-table-body tr');
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        const classCell = row.querySelector('td:nth-child(3)')?.textContent.trim() || '';
+        const status = row.getAttribute('data-status') || 'Active';
+
+        const matchesSearch = !searchTerm || text.includes(searchTerm);
+        const matchesClass = !classFilter || classCell.includes(classFilter);
+        
+        let matchesStatus = true;
+        if (statusFilter === 'active') {
+            matchesStatus = status !== 'Left';
+        } else if (statusFilter === 'left') {
+            matchesStatus = status === 'Left';
+        }
+
+        row.style.display = (matchesSearch && matchesClass && matchesStatus) ? '' : 'none';
+    });
+}
+
 // Save or Update Single Student (Handles both Add & Edit Modals)
 async function handleSaveStudent(event) {
     if (event) event.preventDefault();
@@ -1788,161 +2033,7 @@ async function deleteStudent(studentId) {
         showToast('Failed to delete student from cloud: ' + error.message, 'error');
     }
 }
-
-// Real-time Firestore Listener
-function listenToStudentRegistry(containerId = 'main-content') {
-    if (typeof db === 'undefined' || !db) return;
-
-    db.collection('students').onSnapshot((snapshot) => {
-        const container = document.getElementById(containerId) || document.getElementById('student-registry-container');
-        if (container) {
-            renderStudentRegistry(container);
-        }
-    }, (error) => {
-        console.error("Real-time sync error:", error);
-    });
-}
-
-async function renderStudentRegistry(container) {
-    if (!container) return;
-    
-    // Show loading indicator
-    container.innerHTML = `<div class="p-8 text-center text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i> Loading register from cloud...</div>`;
-
-    // Fetch from Firebase
-    const students = await DataService.getStudents();
-    const activeStudents = students.filter(s => s.status !== 'Left');
-    const leftStudents = students.filter(s => s.status === 'Left');
-    const sortedStudents = [...students].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    
-    const uniqueClasses = [...new Set(students.map(s => s.class))].filter(Boolean).sort();
-
-    // Render registry table html
-    container.innerHTML = `
-        <div class="bg-white rounded-2xl shadow">
-            <!-- Header Controls & Actions -->
-            <div class="p-4 border-b">
-                <div class="flex flex-wrap gap-3 items-center justify-between">
-                    <div class="flex flex-wrap gap-3 items-center flex-1">
-                        <div class="flex-1 min-w-[200px]">
-                            <div class="relative">
-                                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
-                                <input type="text" id="student-search" 
-                                       class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                       placeholder="Search by ID, Name, Class, or Phone..." 
-                                       oninput="filterStudentTable()">
-                            </div>
-                        </div>
-                        <select id="student-class-filter" class="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" onchange="filterStudentTable()">
-                            <option value="">All Classes</option>
-                            ${uniqueClasses.map(cls => `<option value="${escapeHtml(cls)}">${escapeHtml(cls)}</option>`).join('')}
-                        </select>
-                        <select id="student-status-filter" class="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" onchange="filterStudentTable()">
-                            <option value="active">Active Only</option>
-                            <option value="left">Left Only</option>
-                            <option value="all">All (including Left)</option>
-                        </select>
-                    </div>
-                    
-                    <div class="flex gap-2 flex-wrap">
-                        <button onclick="showAddStudentModal()" class="bg-indigo-600 text-white px-4 py-2.5 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
-                            <i class="fas fa-plus"></i> Add Student
-                        </button>
-                        <button onclick="showTransferStudentModal()" class="bg-purple-600 text-white px-4 py-2.5 rounded-lg hover:bg-purple-700 flex items-center gap-2">
-                            <i class="fas fa-arrow-right"></i> Transfer In
-                        </button>
-                        <button onclick="showBulkUploadModal()" class="bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 flex items-center gap-2">
-                            <i class="fas fa-upload"></i> Bulk Import
-                        </button>
-                        <button onclick="exportStudentsToCSV()" class="bg-slate-700 text-white px-4 py-2.5 rounded-lg hover:bg-slate-800 flex items-center gap-2" title="Export Register to CSV">
-                            <i class="fas fa-file-excel"></i> Export CSV
-                        </button>
-                    </div>
-                </div>
-            </div>
             
-            <!-- Table Body -->
-            <div class="overflow-x-auto">
-                <table class="table w-full border-collapse">
-                    <thead>
-                        <tr class="bg-gray-50 border-b">
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Student ID</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Full Name</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Class</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Parent Phone</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Status</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="student-table-body">
-                        ${sortedStudents.map((student, index) => `
-                            <tr class="${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-indigo-50 ${student.status === 'Left' ? 'opacity-60' : ''}" data-id="${escapeHtml(student.id)}" data-status="${escapeHtml(student.status || 'Active')}">
-                                <td class="px-4 py-3 text-sm font-mono">${escapeHtml(student.id)}</td>
-                                <td class="px-4 py-3 text-sm font-medium">${escapeHtml(student.name)}</td>
-                                <td class="px-4 py-3 text-sm">
-                                    <span class="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-semibold">${escapeHtml(student.class)}</span>
-                                </td>
-                                <td class="px-4 py-3 text-sm">
-                                    <span class="font-mono text-sm">${student.parentPhone ? escapeHtml(formatPhoneForDisplay(student.parentPhone)) : 'N/A'}</span>
-                                </td>
-                                <td class="px-4 py-3 text-sm">
-                                    <span class="px-2 py-1 ${student.status === 'Active' ? 'bg-green-100 text-green-800' : student.status === 'Transfer' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'} rounded-full text-xs font-semibold">
-                                        ${escapeHtml(student.status || 'Active')}
-                                    </span>
-                                </td>
-                                <td class="px-4 py-3 text-sm">
-                                    <button onclick="openEditStudentModal('${escapeHtml(student.id)}')" class="text-blue-600 hover:text-blue-800 mr-1" title="Edit Student">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                    <button onclick="openPhoneUpdateModal('${escapeHtml(student.id)}')" class="text-amber-600 hover:text-amber-800 mr-1" title="Update Phone">
-                                        <i class="fas fa-phone"></i>
-                                    </button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-            
-            <div class="p-4 border-t text-sm text-gray-500 flex justify-between">
-                <span>Active Students: ${activeStudents.length}</span>
-                <span>Left: ${leftStudents.length}</span>
-                <span>Total: ${students.length}</span>
-            </div>
-        </div>
-    `;
-
-    filterStudentTable();
-}
-            
-/**
- * Filter handler supporting search query, class, and active/left status.
- */
-function filterStudentTable() {
-    const searchTerm = document.getElementById('student-search')?.value.toLowerCase().trim() || '';
-    const classFilter = document.getElementById('student-class-filter')?.value || '';
-    const statusFilter = document.getElementById('student-status-filter')?.value || 'active';
-    const rows = document.querySelectorAll('#student-table-body tr');
-    
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        const classCell = row.querySelector('td:nth-child(3)')?.textContent.trim() || '';
-        const status = row.getAttribute('data-status') || 'Active';
-
-        const matchesSearch = !searchTerm || text.includes(searchTerm);
-        const matchesClass = !classFilter || classCell.includes(classFilter);
-        
-        let matchesStatus = true;
-        if (statusFilter === 'active') {
-            matchesStatus = status !== 'Left';
-        } else if (statusFilter === 'left') {
-            matchesStatus = status === 'Left';
-        }
-
-        row.style.display = (matchesSearch && matchesClass && matchesStatus) ? '' : 'none';
-    });
-}
-
 // ============================================================================
 //  BULK IMPORT ENGINE (CSV/EXCEL WITH AUTO-SORT & ID ASSIGNMENT)
 // ============================================================================
@@ -2621,47 +2712,6 @@ async function reactivateStudent(studentId) {
 // ============================================================================
 // 5. VIEWS & RENDERING COMPONENTS
 // ============================================================================
-
-/**
- * Creates lightweight HTML table snippet for dashboard/recent students component.
- */
-function createRecentStudentsTable(students) {
-    if (!students || students.length === 0) {
-        return `<div class="p-4 text-center text-gray-500">No recent students found.</div>`;
-    }
-
-    return `
-        <div class="table-wrapper border rounded-lg overflow-hidden">
-            <table class="table w-full border-collapse">
-                <thead>
-                    <tr class="bg-indigo-50 border-b-2 border-indigo-200">
-                        <th class="px-4 py-3 text-left text-xs font-semibold text-indigo-800 uppercase tracking-wider border-r border-indigo-100">Name</th>
-                        <th class="px-4 py-3 text-left text-xs font-semibold text-indigo-800 uppercase tracking-wider border-r border-indigo-100">Class</th>
-                        <th class="px-4 py-3 text-left text-xs font-semibold text-indigo-800 uppercase tracking-wider border-r border-indigo-100">Sex</th>
-                        <th class="px-4 py-3 text-left text-xs font-semibold text-indigo-800 uppercase tracking-wider">Admission Date</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${students.map((student, i) => `
-                        <tr class="${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-indigo-50 transition-colors duration-150">
-                            <td class="px-4 py-3 text-sm text-gray-800 border-r border-gray-100 font-medium">${escapeHtml(student.name)}</td>
-                            <td class="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">
-                                <span class="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-semibold">${escapeHtml(student.class)}</span>
-                            </td>
-                            <td class="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">
-                                <span class="${student.sex === 'Female' ? 'text-pink-600' : 'text-blue-600'}">
-                                    <i class="fas ${student.sex === 'Female' ? 'fa-venus' : 'fa-mars'} mr-1"></i>
-                                    ${escapeHtml(student.sex)}
-                                </span>
-                            </td>
-                            <td class="px-4 py-3 text-sm text-gray-600">${student.admissionDate ? formatDate(student.admissionDate) : 'N/A'}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        </div>
-    `;
-}
 
 /**
  * Standard Student List View with ID-based Event Delegation.
