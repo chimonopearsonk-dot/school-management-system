@@ -10010,9 +10010,18 @@ function seedData() {
     document.addEventListener("click", function(e) {
         if (window.innerWidth < 1024) {
             const isSidebar = sidebar.contains(e.target);
-            const isToggle = mobileBtn && mobileBtn.contains(e.target);
-            if (!isSidebar && !isToggle) {
-                sidebar.classList.remove("mobile-open");
+            // Safe initialization for mobile navigation button
+            const mobileBtn = document.getElementById('mobile-menu-btn') || 
+            document.getElementById('mobile-btn') || 
+            document.querySelector('.mobile-menu-button');
+            
+            if (mobileBtn) {
+                mobileBtn.addEventListener('click', function() {
+                    const sidebar = document.getElementById('sidebar') || document.querySelector('aside');
+                    if (sidebar) {
+                        sidebar.classList.toggle('hidden');
+                    }
+                });
             }
         }
     });
@@ -10166,6 +10175,14 @@ function logoutUser() {
         window.location.href = 'index.html';
     }
 }
+
+// Global alias to map modal submit calls to handleSaveStudent
+function saveStudent(event) {
+    if (typeof handleSaveStudent === 'function') {
+        return handleSaveStudent(event);
+    }
+}
+window.saveStudent = saveStudent;
 
 // Listen for page refresh and browser history back/forward actions
 window.addEventListener('DOMContentLoaded', handleInitialRoute);
