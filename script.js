@@ -2030,23 +2030,35 @@ function showAddStudentModal() {
     document.getElementById('studentForm').onsubmit = saveStudent;
 }
 
+// Helper to safely retrieve input values across common HTML ID variations
+function getFormInputValue(ids) {
+    for (const id of ids) {
+        const el = document.getElementById(id) || document.querySelector(`[name="${id}"]`);
+        if (el && el.value && el.value.trim() !== '') {
+            return el.value.trim();
+        }
+    }
+    return '';
+}
+
 // Add or Save Single Student
 async function handleSaveStudent(event) {
     if (event) event.preventDefault();
 
-    const studentIdInput = document.getElementById('student-id');
-    const nameInput = document.getElementById('student-name');
-    const classInput = document.getElementById('student-class');
-    const phoneInput = document.getElementById('student-phone');
-    const statusInput = document.getElementById('student-status');
+    // Look up values using flexible fallback IDs
+    const studentName = getFormInputValue(['student-name', 'studentName', 'name', 'add-student-name']);
+    const className = getFormInputValue(['student-class', 'studentClass', 'class', 'className', 'add-student-class']);
+    const parentPhone = getFormInputValue(['student-phone', 'studentPhone', 'phone', 'parentPhone']);
+    const status = getFormInputValue(['student-status', 'studentStatus', 'status']) || 'Active';
+    const rawStudentId = getFormInputValue(['student-id', 'studentId', 'id']);
 
-    if (!nameInput?.value || !classInput?.value) {
+    if (!studentName || !className) {
         showToast('Please fill in required fields (Name and Class)', 'error');
         return;
     }
 
     // Generate standard ID if input is empty
-    const studentId = studentIdInput?.value?.trim() || 
+    const studentId = rawStudentId || 
         (typeof DataService !== 'undefined' && DataService.generateId 
             ? DataService.generateId('BAGSS') 
             : 'BAGSS-' + Date.now().toString().slice(-4));
@@ -2054,11 +2066,11 @@ async function handleSaveStudent(event) {
     const studentData = {
         id: studentId,
         studentId: studentId,
-        name: nameInput.value.trim(),
-        class: classInput.value.trim(),
-        className: classInput.value.trim(),
-        parentPhone: phoneInput ? phoneInput.value.trim() : '',
-        status: statusInput ? statusInput.value : 'Active',
+        name: studentName,
+        class: className,
+        className: className,
+        parentPhone: parentPhone,
+        status: status,
         entryDate: new Date().toISOString().split('T')[0],
         updatedAt: new Date().toISOString()
     };
