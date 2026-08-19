@@ -2045,13 +2045,19 @@ function getFormInputValue(ids) {
 async function handleSaveStudent(event) {
     if (event) event.preventDefault();
 
-    // Grab values directly using the modal's input IDs
-    const nameInput = document.getElementById('sname');
-    const classInput = document.getElementById('sclass');
-    const sexInput = document.getElementById('ssex');
-    const ageInput = document.getElementById('sage');
-    const yearInput = document.getElementById('sadmission-year');
-    const phoneInput = document.getElementById('sparent-phone');
+    // Query inputs specifically inside the active form to avoid duplicate DOM collisions
+    const form = event?.target || document.getElementById('studentForm');
+    if (!form) {
+        showToast('Form element not found.', 'error');
+        return;
+    }
+
+    const nameInput = form.querySelector('#sname') || document.getElementById('sname');
+    const classInput = form.querySelector('#sclass') || document.getElementById('sclass');
+    const sexInput = form.querySelector('#ssex') || document.getElementById('ssex');
+    const ageInput = form.querySelector('#sage') || document.getElementById('sage');
+    const yearInput = form.querySelector('#sadmission-year') || document.getElementById('sadmission-year');
+    const phoneInput = form.querySelector('#sparent-phone') || document.getElementById('sparent-phone');
 
     const name = nameInput ? nameInput.value.trim() : '';
     const className = classInput ? classInput.value.trim() : '';
@@ -2061,54 +2067,52 @@ async function handleSaveStudent(event) {
         return;
     }
 
-    // Generate standard student ID
-    const studentId = (typeof DataService !== 'undefined' && DataService.generateId)
-        ? DataService.generateId('BAGSS')
-        : 'BAGSS-' + Date.now().toString().slice(-4);
+    // Generate a unique Document ID (e.g. BAGSS-8492-1049)
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const studentId = 'BAGSS-' + Date.now().toString().slice(-4) + '-' + randomSuffix;
 
+    // Create object with key variations so table renders regardless of property name used
     const studentData = {
         id: studentId,
         studentId: studentId,
         name: name,
+        studentName: name,
         class: className,
         className: className,
         sex: sexInput ? sexInput.value : 'Female',
         age: ageInput ? ageInput.value : '',
         admissionYear: yearInput ? yearInput.value : new Date().getFullYear().toString(),
         parentPhone: phoneInput ? phoneInput.value.trim() : '',
+        phone: phoneInput ? phoneInput.value.trim() : '',
         status: 'Active',
         entryDate: new Date().toISOString().split('T')[0],
         updatedAt: new Date().toISOString()
     };
 
     try {
-        // 1. Save directly to Firebase Firestore
+        // 1. Save document to Firestore using the unique studentId
         if (typeof db !== 'undefined' && db) {
-            await db.collection('students').doc(studentData.id).set(studentData, { merge: true });
+            await db.collection('students').doc(studentData.id).set(studentData);
         } else if (typeof FirestoreService !== 'undefined' && FirestoreService.saveStudent) {
             await FirestoreService.saveStudent(studentData);
         } else {
-            throw new Error('Firebase Firestore instance (db) is not available');
+            throw new Error('Firebase Firestore instance (db) is not defined');
         }
 
-        // 2. Update local DataService memory cache for instant UI refresh
+        // 2. Update local DataService cache for instant UI rendering
         if (typeof DataService !== 'undefined' && DataService.get && DataService.set) {
             let currentStudents = DataService.get('students') || [];
             if (!Array.isArray(currentStudents)) currentStudents = [];
             
-            const existingIndex = currentStudents.findIndex(s => s.id === studentData.id);
-            if (existingIndex >= 0) {
-                currentStudents[existingIndex] = { ...currentStudents[existingIndex], ...studentData };
-            } else {
-                currentStudents.unshift(studentData);
-            }
+            currentStudents = currentStudents.filter(s => s.id !== studentData.id);
+            currentStudents.unshift(studentData);
             DataService.set('students', currentStudents);
         }
 
         showToast(`Student ${studentData.name} saved successfully to cloud!`, 'success');
         
         if (typeof closeModal === 'function') closeModal();
-        
+
         // 3. Re-render student registry table
         const container = document.getElementById('main-content') || 
                           document.getElementById('content') || 
@@ -2123,7 +2127,6 @@ async function handleSaveStudent(event) {
     }
 }
 
-// Global alias for modal form submission
 function saveStudent(event) {
     return handleSaveStudent(event);
 }
