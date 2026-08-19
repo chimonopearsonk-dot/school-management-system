@@ -1835,8 +1835,8 @@ function showBulkUploadModal() {
         <!-- Action Buttons -->
         <div class="flex justify-end gap-3 border-t pt-4 mt-5">
             <button onclick="closeModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Cancel</button>
-            <button id="btn-process-import" onclick="processBulkImport()" disabled class="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold flex items-center gap-2">
-                <i class="fas fa-upload"></i> Process Import
+            <button id="process-import-btn" onclick="processBulkImport()" disabled class="bg-gray-300 text-gray-500 font-semibold px-6 py-2.5 rounded-lg cursor-not-allowed opacity-60">
+                <i class="fas fa-check-circle mr-1"></i> Process Import
             </button>
         </div>
     `;
@@ -1871,15 +1871,21 @@ function downloadStudentTemplate() {
     link.click();
     document.body.removeChild(link);
 }
-
-// ============================================
-// 3. FILE SELECTION & PARSING
-// ============================================
+/**
+ * Initializes Drag-and-Drop and File Input Listeners
+ */
 function setupDropZoneEvents() {
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('bulk-file-input');
     if (!dropZone || !fileInput) return;
 
+    // Click drop zone to open file picker
+    dropZone.onclick = () => fileInput.click();
+
+    // File input manual change
+    fileInput.onchange = (e) => handleBulkFileSelect(e);
+
+    // Drag events
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         dropZone.classList.add('border-blue-500', 'bg-blue-50');
@@ -1951,10 +1957,11 @@ function normalizeBulkImportData(rawRows) {
 }
 
 /**
- * File Input Change Handler: Reads CSV or Excel data when file is chosen
+ * Handles File Parsing, UI Drop Zone Update, and Import Button Activation
  */
 function handleBulkFileSelect(event) {
-    const file = event.target.files[0];
+    const fileInput = event.target || document.getElementById('bulk-file-input');
+    const file = fileInput?.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
@@ -1979,24 +1986,16 @@ function handleBulkFileSelect(event) {
                 }
             }
 
-            // Normalize fields across all rows
+            // Normalize and save parsed entries
             window.pendingImportData = normalizeBulkImportData(rawJson);
 
-            const previewCount = document.getElementById('import-preview-count');
-            if (previewCount) {
-                previewCount.textContent = `${window.pendingImportData.length} valid students found in file.`;
-                previewCount.className = "text-sm text-green-600 font-semibold mt-2";
-            }
-
-            if (window.pendingImportData.length === 0) {
-                showToast('File read, but no rows containing student names were found.', 'error');
-            } else {
-                showToast(`Loaded ${window.pendingImportData.length} students. Click "Process Import" to save.`, 'info');
-            }
+            // Update UI State & Dropzone
+            updateBulkImportUI(file.name, window.pendingImportData.length);
 
         } catch (err) {
-            console.error("Error reading file:", err);
+            console.error("Error reading bulk import file:", err);
             showToast("Failed to parse file: " + err.message, "error");
+            resetBulkImportUI();
         }
     };
 
@@ -2007,6 +2006,80 @@ function handleBulkFileSelect(event) {
     }
 }
 window.handleBulkFileSelect = handleBulkFileSelect;
+
+/**
+ * Updates Drop Zone Visuals and Highlights the Process Import Button
+ */
+function updateBulkImportUI(fileName, studentCount) {
+    const dropZone = document.getElementById('drop-zone');
+    const processBtn = document.getElementById('process-import-btn') || 
+                       document.getElementById('btn-process-import') || 
+                       document.querySelector('button[onclick*="processBulkImport"]');
+
+    if (dropZone) {
+        if (studentCount > 0) {
+            dropZone.className = "border-2 border-dashed border-emerald-500 bg-emerald-50 rounded-xl p-6 text-center cursor-pointer transition-colors";
+            dropZone.innerHTML = `
+                <div class="flex flex-col items-center gap-2">
+                    <i class="fas fa-file-csv text-emerald-600 text-3xl"></i>
+                    <p class="text-sm font-semibold text-emerald-900">${escapeHtml(fileName)}</p>
+                    <span class="px-2.5 py-1 bg-emerald-200 text-emerald-800 rounded-full text-xs font-bold">
+                        ${studentCount} Valid Student(s) Found
+                    </span>
+                    <p class="text-xs text-emerald-600 mt-1">Click or drag another file to replace</p>
+                </div>
+            `;
+        } else {
+            dropZone.className = "border-2 border-dashed border-amber-500 bg-amber-50 rounded-xl p-6 text-center cursor-pointer transition-colors";
+            dropZone.innerHTML = `
+                <div class="flex flex-col items-center gap-2">
+                    <i class="fas fa-exclamation-triangle text-amber-600 text-3xl"></i>
+                    <p class="text-sm font-semibold text-amber-900">${escapeHtml(fileName)}</p>
+                    <p class="text-xs text-amber-700">No valid student rows found. Ensure file contains a "Name" column.</p>
+                </div>
+            `;
+        }
+    }
+
+    if (processBtn) {
+        if (studentCount > 0) {
+            processBtn.disabled = false;
+            processBtn.className = "bg-emerald-600 text-white font-semibold px-6 py-2.5 rounded-lg hover:bg-emerald-700 shadow-md transition-all cursor-pointer opacity-100";
+        } else {
+            processBtn.disabled = true;
+            processBtn.className = "bg-gray-300 text-gray-500 font-semibold px-6 py-2.5 rounded-lg cursor-not-allowed opacity-60";
+        }
+    }
+}
+
+/**
+ * Resets the Bulk Import UI to default initial state
+ */
+function resetBulkImportUI() {
+    window.pendingImportData = [];
+    const dropZone = document.getElementById('drop-zone');
+    const processBtn = document.getElementById('process-import-btn') || 
+                       document.getElementById('btn-process-import') || 
+                       document.querySelector('button[onclick*="processBulkImport"]');
+    const fileInput = document.getElementById('bulk-file-input');
+
+    if (fileInput) fileInput.value = '';
+
+    if (dropZone) {
+        dropZone.className = "border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-400 rounded-xl p-6 text-center cursor-pointer transition-colors";
+        dropZone.innerHTML = `
+            <i class="fas fa-cloud-upload-alt text-indigo-500 text-3xl mb-2"></i>
+            <p class="text-sm font-medium text-gray-700">Drag & drop your Excel/CSV file here, or click to browse</p>
+            <p class="text-xs text-gray-400 mt-1">Supports .csv, .xlsx, .xls</p>
+        `;
+    }
+
+    if (processBtn) {
+        processBtn.disabled = true;
+        processBtn.className = "bg-gray-300 text-gray-500 font-semibold px-6 py-2.5 rounded-lg cursor-not-allowed opacity-60";
+    }
+}
+window.resetBulkImportUI = resetBulkImportUI;
 
 /**
  * Simple CSV Text to Array of Objects Parser
