@@ -2045,32 +2045,38 @@ function getFormInputValue(ids) {
 async function handleSaveStudent(event) {
     if (event) event.preventDefault();
 
-    // Look up values using flexible fallback IDs
-    const studentName = getFormInputValue(['student-name', 'studentName', 'name', 'add-student-name']);
-    const className = getFormInputValue(['student-class', 'studentClass', 'class', 'className', 'add-student-class']);
-    const parentPhone = getFormInputValue(['student-phone', 'studentPhone', 'phone', 'parentPhone']);
-    const status = getFormInputValue(['student-status', 'studentStatus', 'status']) || 'Active';
-    const rawStudentId = getFormInputValue(['student-id', 'studentId', 'id']);
+    // Grab values directly using the modal's input IDs
+    const nameInput = document.getElementById('sname');
+    const classInput = document.getElementById('sclass');
+    const sexInput = document.getElementById('ssex');
+    const ageInput = document.getElementById('sage');
+    const yearInput = document.getElementById('sadmission-year');
+    const phoneInput = document.getElementById('sparent-phone');
 
-    if (!studentName || !className) {
+    const name = nameInput ? nameInput.value.trim() : '';
+    const className = classInput ? classInput.value.trim() : '';
+
+    if (!name || !className) {
         showToast('Please fill in required fields (Name and Class)', 'error');
         return;
     }
 
-    // Generate standard ID if input is empty
-    const studentId = rawStudentId || 
-        (typeof DataService !== 'undefined' && DataService.generateId 
-            ? DataService.generateId('BAGSS') 
-            : 'BAGSS-' + Date.now().toString().slice(-4));
+    // Generate standard student ID
+    const studentId = (typeof DataService !== 'undefined' && DataService.generateId)
+        ? DataService.generateId('BAGSS')
+        : 'BAGSS-' + Date.now().toString().slice(-4);
 
     const studentData = {
         id: studentId,
         studentId: studentId,
-        name: studentName,
+        name: name,
         class: className,
         className: className,
-        parentPhone: parentPhone,
-        status: status,
+        sex: sexInput ? sexInput.value : 'Female',
+        age: ageInput ? ageInput.value : '',
+        admissionYear: yearInput ? yearInput.value : new Date().getFullYear().toString(),
+        parentPhone: phoneInput ? phoneInput.value.trim() : '',
+        status: 'Active',
         entryDate: new Date().toISOString().split('T')[0],
         updatedAt: new Date().toISOString()
     };
@@ -2080,18 +2086,17 @@ async function handleSaveStudent(event) {
         if (typeof db !== 'undefined' && db) {
             await db.collection('students').doc(studentData.id).set(studentData, { merge: true });
         } else if (typeof FirestoreService !== 'undefined' && FirestoreService.saveStudent) {
-            const success = await FirestoreService.saveStudent(studentData);
-            if (!success) throw new Error('FirestoreService failed to save document');
+            await FirestoreService.saveStudent(studentData);
         } else {
-            throw new Error('Firebase Firestore database object (db) is not defined');
+            throw new Error('Firebase Firestore instance (db) is not available');
         }
 
-        // 2. Update local DataService memory cache so renderStudentRegistry immediately displays it
+        // 2. Update local DataService memory cache for instant UI refresh
         if (typeof DataService !== 'undefined' && DataService.get && DataService.set) {
             let currentStudents = DataService.get('students') || [];
             if (!Array.isArray(currentStudents)) currentStudents = [];
             
-            const existingIndex = currentStudents.findIndex(s => s.id === studentData.id || s.studentId === studentData.id);
+            const existingIndex = currentStudents.findIndex(s => s.id === studentData.id);
             if (existingIndex >= 0) {
                 currentStudents[existingIndex] = { ...currentStudents[existingIndex], ...studentData };
             } else {
@@ -2104,7 +2109,7 @@ async function handleSaveStudent(event) {
         
         if (typeof closeModal === 'function') closeModal();
         
-        // 3. Re-render student table UI
+        // 3. Re-render student registry table
         const container = document.getElementById('main-content') || 
                           document.getElementById('content') || 
                           document.getElementById('student-registry-container');
@@ -2117,6 +2122,12 @@ async function handleSaveStudent(event) {
         showToast('Failed to save student: ' + error.message, 'error');
     }
 }
+
+// Global alias for modal form submission
+function saveStudent(event) {
+    return handleSaveStudent(event);
+}
+window.saveStudent = saveStudent;
 
 // Automatically sync student registry from Firestore across all devices on load
 function listenToFirestoreStudents() {
