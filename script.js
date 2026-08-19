@@ -1822,7 +1822,7 @@ function showBulkUploadModal() {
                     <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-1"></i>
                     <p class="text-sm text-gray-600">Click to browse or drag & drop CSV file here</p>
                     <p id="selected-file-name" class="text-xs text-blue-600 font-semibold mt-2 hidden"></p>
-                    <input type="file" id="bulk-file-input" accept=".csv" class="hidden" onchange="handleFileSelect(event)">
+                    <input type="file" id="bulk-file-input" accept=".csv" class="hidden" onchange="handleBulkFileSelect(event)">
                 </div>
             </div>
 
@@ -1894,97 +1894,179 @@ function setupDropZoneEvents() {
         dropZone.classList.remove('border-blue-500', 'bg-blue-50');
         if (e.dataTransfer.files.length) {
             fileInput.files = e.dataTransfer.files;
-            handleFileSelect({ target: fileInput });
+            handleBulkFileSelect({ target: fileInput });
         }
     });
 }
 
-function handleFileSelect(event) {
-    const file = event.target.files[0];
-    const previewInfo = document.getElementById('import-preview-info');
-    const recordCountSpan = document.getElementById('import-record-count');
-    const processBtn = document.getElementById('btn-process-import');
-    const fileNameSpan = document.getElementById('selected-file-name');
+// Global variable to hold parsed import data
+window.pendingImportData = [];
 
+/**
+ * Flexible Column Normalizer
+ * Maps various Excel/CSV header names to unified student properties.
+ */
+function normalizeBulkImportData(rawRows) {
+    if (!Array.isArray(rawRows)) return [];
+
+    return rawRows.map(row => {
+        // Helper to match key variations (case-insensitive)
+        const getValue = (possibleHeaders) => {
+            for (const key of Object.keys(row)) {
+                const cleanKey = key.trim().toLowerCase();
+                if (possibleHeaders.some(p => cleanKey === p.toLowerCase())) {
+                    return String(row[key] || '').trim();
+                }
+            }
+            return '';
+        };
+
+        const name = getValue(['name', 'student name', 'full name', 'fullname', 'student_name', 'student']);
+        const className = getValue(['class', 'classname', 'class name', 'grade', 'form', 'stream']);
+        const rawSex = getValue(['sex', 'gender', 'm/f']);
+        
+        let sex = 'Female';
+        if (rawSex) {
+            const s = rawSex.toLowerCase();
+            if (s.startsWith('m') || s === 'boy') sex = 'Male';
+            else if (s.startsWith('f') || s === 'girl') sex = 'Female';
+        }
+
+        const phone = getValue(['phone', 'parent phone', 'parentphone', 'phone number', 'contact', 'mobile', 'parent contact']);
+        const status = getValue(['status', 'type', 'enrollment status']) || 'Active';
+        const age = getValue(['age', 'years']);
+
+        return {
+            name: name,
+            studentName: name,
+            class: className,
+            className: className,
+            sex: sex,
+            parentPhone: phone,
+            phone: phone,
+            status: status,
+            age: age
+        };
+    }).filter(s => s.name.length > 0); // Drop rows without a name
+}
+
+/**
+ * File Input Change Handler: Reads CSV or Excel data when file is chosen
+ */
+function handleBulkFileSelect(event) {
+    const file = event.target.files[0];
     if (!file) return;
 
-    if (!file.name.endsWith('.csv')) {
-        showToast('Please upload a valid .csv file', 'error');
-        return;
-    }
-
-    fileNameSpan.textContent = `Selected: ${file.name}`;
-    fileNameSpan.classList.remove('hidden');
-
     const reader = new FileReader();
-    reader.onload = function (e) {
-        pendingImportData = parseCSVText(e.target.result);
+    const fileName = file.name.toLowerCase();
 
-        if (pendingImportData.length === 0) {
-            showToast('No valid student records found in file', 'warning');
-            processBtn.disabled = true;
-            previewInfo.classList.add('hidden');
-        } else {
-            recordCountSpan.textContent = pendingImportData.length;
-            previewInfo.classList.remove('hidden');
-            processBtn.disabled = false;
+    reader.onload = function(e) {
+        try {
+            let rawJson = [];
+
+            if (fileName.endsWith('.csv')) {
+                const text = e.target.result;
+                rawJson = parseCSVToObjects(text);
+            } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+                if (typeof XLSX !== 'undefined') {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    rawJson = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
+                } else {
+                    showToast('Excel library (XLSX) not loaded. Please use a CSV file.', 'error');
+                    return;
+                }
+            }
+
+            // Normalize fields across all rows
+            window.pendingImportData = normalizeBulkImportData(rawJson);
+
+            const previewCount = document.getElementById('import-preview-count');
+            if (previewCount) {
+                previewCount.textContent = `${window.pendingImportData.length} valid students found in file.`;
+                previewCount.className = "text-sm text-green-600 font-semibold mt-2";
+            }
+
+            if (window.pendingImportData.length === 0) {
+                showToast('File read, but no rows containing student names were found.', 'error');
+            } else {
+                showToast(`Loaded ${window.pendingImportData.length} students. Click "Process Import" to save.`, 'info');
+            }
+
+        } catch (err) {
+            console.error("Error reading file:", err);
+            showToast("Failed to parse file: " + err.message, "error");
         }
     };
 
-    reader.readAsText(file);
+    if (fileName.endsWith('.csv')) {
+        reader.readAsText(file);
+    } else {
+        reader.readAsArrayBuffer(file);
+    }
 }
+window.handleBulkFileSelect = handleBulkFileSelect;
 
-function parseCSVText(csvText) {
-    const lines = csvText.split(/\r\n|\n/).filter(line => line.trim() !== '');
+/**
+ * Simple CSV Text to Array of Objects Parser
+ */
+function parseCSVToObjects(csvText) {
+    const lines = csvText.split(/\r\n|\n/).filter(line => line.trim().length > 0);
     if (lines.length < 2) return [];
 
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^"(.*)"$/, '$1').toLowerCase());
-    const results = [];
+    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+    const result = [];
 
     for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g) || lines[i].split(',');
-        if (!values || values.length === 0) continue;
+        const obj = {};
+        const currentline = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
 
-        const rowObj = {};
         headers.forEach((header, index) => {
-            let val = values[index] ? values[index].trim().replace(/^"(.*)"$/, '$1') : '';
-            rowObj[header] = val;
+            obj[header] = currentline[index] || '';
         });
 
-        if (rowObj['full name (surname first)'] || rowObj['full name'] || rowObj['name']) {
-            results.push(rowObj);
-        }
+        result.push(obj);
     }
-
-    return results;
+    return result;
 }
 
-async function processBulkImport(rawStudentList, defaultYear = new Date().getFullYear()) {
-    if (!Array.isArray(rawStudentList) || rawStudentList.length === 0) {
-        showToast('No valid student data found to import.', 'error');
+/**
+ * Triggered by the "Process Import" Button
+ */
+async function processBulkImport(rawStudentList = null, defaultYear = new Date().getFullYear()) {
+    // Fall back to memory if list was not passed directly
+    const listToProcess = (Array.isArray(rawStudentList) && rawStudentList.length > 0) 
+        ? rawStudentList 
+        : window.pendingImportData;
+
+    const normalizedList = normalizeBulkImportData(listToProcess);
+
+    if (!normalizedList || normalizedList.length === 0) {
+        showToast('No valid student data found to import. Please select a valid CSV or Excel file first.', 'error');
         return;
     }
 
-    // STEP 1: Sort raw uploaded students FIRST (Females first, then A-Z)
-    const sortedRawList = sortStudentCohort(rawStudentList);
+    // 1. Sort cohort FIRST (Females first, then A-Z)
+    const sortedCohort = sortStudentCohort(normalizedList);
 
-    // STEP 2: Assign Permanent Sequential IDs to the sorted cohort
-    const preparedStudents = sortedRawList.map((student, index) => {
+    // 2. Assign Permanent Sequential IDs
+    const preparedStudents = sortedCohort.map((student, index) => {
         const isTransfer = student.status === 'Transfer';
-        const permanentId = student.id || generatePermanentStudentId(defaultYear, isTransfer, index);
+        const permanentId = generatePermanentStudentId(defaultYear, isTransfer, index);
 
         return {
             id: permanentId,
             studentId: permanentId,
-            name: student.name || student.studentName || 'Unknown',
-            studentName: student.name || student.studentName || 'Unknown',
-            class: student.class || student.className || '',
-            className: student.class || student.className || '',
+            name: student.name,
+            studentName: student.name,
+            class: student.class || 'Unassigned',
+            className: student.class || 'Unassigned',
             sex: student.sex || 'Female',
             age: student.age || '',
             admissionYear: String(defaultYear),
-            parentPhone: student.parentPhone || student.phone || '',
-            phone: student.parentPhone || student.phone || '',
+            parentPhone: student.parentPhone || '',
+            phone: student.parentPhone || '',
             status: student.status || 'Active',
             entryDate: new Date().toISOString().split('T')[0],
             updatedAt: new Date().toISOString()
@@ -1992,7 +2074,7 @@ async function processBulkImport(rawStudentList, defaultYear = new Date().getFul
     });
 
     try {
-        // STEP 3: Batch Save to Firestore
+        // 3. Save to Firestore Batch
         if (typeof db !== 'undefined' && db) {
             const batch = db.batch();
             preparedStudents.forEach(st => {
@@ -2002,7 +2084,7 @@ async function processBulkImport(rawStudentList, defaultYear = new Date().getFul
             await batch.commit();
         }
 
-        // STEP 4: Merge & Sort with existing local DataService cache
+        // 4. Update Local Memory Cache
         let currentStudents = (typeof DataService !== 'undefined' && DataService.get) ? (DataService.get('students') || []) : [];
         
         preparedStudents.forEach(newSt => {
@@ -2019,10 +2101,13 @@ async function processBulkImport(rawStudentList, defaultYear = new Date().getFul
             DataService.set('students', currentStudents);
         }
 
-        showToast(`Successfully imported ${preparedStudents.length} students!`, 'success');
+        // Reset memory buffer
+        window.pendingImportData = [];
+
+        showToast(`Successfully imported ${preparedStudents.length} students with permanent IDs!`, 'success');
         if (typeof closeModal === 'function') closeModal();
 
-        // STEP 5: Trigger UI Sync across views
+        // 5. Synchronize both UI views immediately
         syncAllStudentViews(currentStudents);
 
     } catch (error) {
