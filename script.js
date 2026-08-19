@@ -1416,6 +1416,26 @@ if (typeof window.showToast === 'undefined') {
 
 let currentEditingId = null;
 
+// Ensure DataService has async getStudents method
+if (typeof DataService !== 'undefined' && !DataService.getStudents) {
+    DataService.getStudents = async function() {
+        if (typeof db !== 'undefined' && db) {
+            try {
+                const snapshot = await db.collection('students').get();
+                const cloudStudents = [];
+                snapshot.forEach(doc => cloudStudents.push(doc.data()));
+                if (cloudStudents.length > 0) {
+                    DataService.set('students', cloudStudents);
+                    return cloudStudents;
+                }
+            } catch (e) {
+                console.error('Error fetching students from Firestore:', e);
+            }
+        }
+        return DataService.get('students') || [];
+    };
+}
+
 // ============================================================================
 // PERMANENT STUDENT ID GENERATION & COHORT SORTING
 // ============================================================================
@@ -1426,7 +1446,7 @@ let currentEditingId = null;
  * Format for Transfer In: BAGSS/2026/T001
  */
 function generatePermanentStudentId(admissionYear = new Date().getFullYear(), isTransfer = false, offset = 0) {
-    const students = DataService.get('students') || [];
+    const students = (typeof DataService !== 'undefined' && DataService.get) ? (DataService.get('students') || []) : [];
     const yearStr = String(admissionYear);
     const prefix = `BAGSS/${yearStr}/`;
     
@@ -1471,6 +1491,302 @@ function sortStudentCohort(studentList) {
         }
         return (a.name || '').localeCompare(b.name || '');
     });
+}
+
+// Save or Update Single Student (Handles both Add & Edit Modals)
+async function handleSaveStudent(event) {
+    if (event) event.preventDefault();
+
+    const form = event?.target || document.getElementById('studentForm') || document;
+
+    // Check for existing ID (Edit mode) or blank (Add mode)
+    const existingIdInput = form.querySelector('#student-id') || document.getElementById('student-id');
+    const existingId = existingIdInput ? existingIdInput.value.trim() : '';
+
+    // Form inputs (supporting both Add and Edit modal input IDs)
+    const nameInput = form.querySelector('#student-name') || form.querySelector('#sname') || document.getElementById('student-name') || document.getElementById('sname');
+    const classInput = form.querySelector('#student-class') || form.querySelector('#sclass') || document.getElementById('student-class') || document.getElementById('sclass');
+    const phoneInput = form.querySelector('#student-phone') || form.querySelector('#sparent-phone') || document.getElementById('student-phone') || document.getElementById('sparent-phone');
+    const statusInput = form.querySelector('#student-status') || document.getElementById('student-status');
+    const sexInput = form.querySelector('#ssex') || document.getElementById('ssex');
+    const ageInput = form.querySelector('#sage') || document.getElementById('sage');
+    const yearInput = form.querySelector('#sadmission-year') || document.getElementById('sadmission-year');
+
+    const name = nameInput ? nameInput.value.trim() : '';
+    const className = classInput ? classInput.value.trim() : '';
+
+    if (!name || !className) {
+        showToast('Please fill in required fields (Name and Class)', 'error');
+        return;
+    }
+
+    const parentPhone = phoneInput ? phoneInput.value.trim() : '';
+    const status = statusInput ? statusInput.value : 'Active';
+    const sex = sexInput ? sexInput.value : 'Female';
+    const age = ageInput ? ageInput.value : '';
+    const admissionYear = yearInput ? yearInput.value : new Date().getFullYear();
+
+    // Determine permanent ID
+    const studentId = existingId || generatePermanentStudentId(admissionYear, status === 'Transfer');
+
+    const studentData = {
+        id: studentId,
+        studentId: studentId,
+        name: name,
+        studentName: name,
+        class: className,
+        className: className,
+        sex: sex,
+        age: age,
+        admissionYear: String(admissionYear),
+        parentPhone: parentPhone,
+        phone: parentPhone,
+        status: status,
+        entryDate: new Date().toISOString().split('T')[0],
+        updatedAt: new Date().toISOString()
+    };
+
+    try {
+        // 1. Save directly to Firebase Firestore
+        if (typeof db !== 'undefined' && db) {
+            await db.collection('students').doc(studentData.id).set(studentData, { merge: true });
+        } else if (typeof FirestoreService !== 'undefined' && FirestoreService.saveStudent) {
+            await FirestoreService.saveStudent(studentData);
+        } else {
+            throw new Error('Firebase Firestore instance (db) is not defined');
+        }
+
+        // 2. Update local DataService memory cache with cohort sorting
+        if (typeof DataService !== 'undefined' && DataService.get && DataService.set) {
+            let currentStudents = DataService.get('students') || [];
+            if (!Array.isArray(currentStudents)) currentStudents = [];
+
+            const existingIndex = currentStudents.findIndex(s => s.id === studentData.id);
+            if (existingIndex >= 0) {
+                currentStudents[existingIndex] = { ...currentStudents[existingIndex], ...studentData };
+            } else {
+                currentStudents.push(studentData);
+            }
+
+            // Apply cohort sorting
+            currentStudents = sortStudentCohort(currentStudents);
+            DataService.set('students', currentStudents);
+        }
+
+        showToast(`Student ${studentData.name} saved successfully!`, 'success');
+        
+        if (typeof closeModal === 'function') closeModal();
+
+        // 3. Re-render student registry table
+        const container = document.getElementById('main-content') || 
+                          document.getElementById('content') || 
+                          document.getElementById('student-registry-container');
+                          
+        if (container && typeof renderStudentRegistry === 'function') {
+            renderStudentRegistry(container);
+        }
+    } catch (error) {
+        console.error('Error saving student to Firestore:', error);
+        showToast('Failed to save student: ' + error.message, 'error');
+    }
+}
+
+function saveStudent(event) {
+    return handleSaveStudent(event);
+}
+window.saveStudent = saveStudent;
+
+// Open Edit Student Modal with Cloud Data
+async function openEditStudentModal(studentId) {
+    const students = await DataService.getStudents();
+    const student = students.find(s => s.id === studentId);
+
+    if (!student) {
+        showToast('Student not found!', 'error');
+        return;
+    }
+
+    const modalContent = document.getElementById('modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold text-gray-800">Edit Student</h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <form onsubmit="handleSaveStudent(event)">
+            <input type="hidden" id="student-id" value="${escapeHtml(student.id)}">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Student ID</label>
+                    <input type="text" value="${escapeHtml(student.id)}" class="w-full px-3 py-2 border rounded-lg bg-gray-100" disabled>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+                    <input type="text" id="student-name" value="${escapeHtml(student.name)}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Class *</label>
+                    <input type="text" id="student-class" value="${escapeHtml(student.class || student.className || '')}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Parent Phone</label>
+                    <input type="text" id="student-phone" value="${escapeHtml(student.parentPhone || student.phone || '')}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <select id="student-status" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+                        <option value="Active" ${student.status === 'Active' ? 'selected' : ''}>Active</option>
+                        <option value="Transfer" ${student.status === 'Transfer' ? 'selected' : ''}>Transfer</option>
+                        <option value="Left" ${student.status === 'Left' ? 'selected' : ''}>Left</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-3">
+                <button type="button" onclick="closeModal()" class="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium">Save Changes</button>
+            </div>
+        </form>
+    `;
+
+    const modal = document.getElementById('modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+    }
+}
+
+// Open Phone Update Modal with Cloud Data
+async function openPhoneUpdateModal(studentId) {
+    const students = await DataService.getStudents();
+    const student = students.find(s => s.id === studentId);
+
+    if (!student) {
+        showToast('Student not found!', 'error');
+        return;
+    }
+
+    const modalContent = document.getElementById('modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold text-gray-800">Update Parent Phone</h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <form onsubmit="handleUpdatePhone(event, '${escapeHtml(student.id)}')">
+            <div class="space-y-4">
+                <p class="text-sm text-gray-600">Updating phone for <strong>${escapeHtml(student.name)}</strong> (${escapeHtml(student.id)})</p>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Parent Phone Number</label>
+                    <input type="text" id="update-parent-phone" value="${escapeHtml(student.parentPhone || student.phone || '')}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="+265..." required>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-3">
+                <button type="button" onclick="closeModal()" class="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 font-medium">Update Phone</button>
+            </div>
+        </form>
+    `;
+
+    const modal = document.getElementById('modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+    }
+}
+
+// Handle Phone Number Update
+async function handleUpdatePhone(event, studentId) {
+    if (event) event.preventDefault();
+
+    const phoneInput = document.getElementById('update-parent-phone');
+    if (!phoneInput) return;
+
+    const newPhone = phoneInput.value.trim();
+
+    try {
+        // 1. Update in Firestore
+        if (typeof db !== 'undefined' && db) {
+            await db.collection('students').doc(studentId).set({
+                parentPhone: newPhone,
+                phone: newPhone,
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        }
+
+        // 2. Update in DataService local cache
+        if (typeof DataService !== 'undefined' && DataService.get && DataService.set) {
+            let students = DataService.get('students') || [];
+            const studentIndex = students.findIndex(s => s.id === studentId);
+            if (studentIndex >= 0) {
+                students[studentIndex].parentPhone = newPhone;
+                students[studentIndex].phone = newPhone;
+                DataService.set('students', students);
+            }
+        }
+
+        showToast('Parent phone updated successfully!', 'success');
+        if (typeof closeModal === 'function') closeModal();
+
+        // 3. Refresh Table
+        const container = document.getElementById('main-content') || 
+                          document.getElementById('content') || 
+                          document.getElementById('student-registry-container');
+                          
+        if (container && typeof renderStudentRegistry === 'function') {
+            renderStudentRegistry(container);
+        }
+    } catch (error) {
+        console.error('Error updating phone:', error);
+        showToast('Failed to update phone: ' + error.message, 'error');
+    }
+}
+
+// Safely deletes a student from Firestore & DataService by unique Student ID
+async function deleteStudent(studentId) {
+    if (!studentId) return;
+
+    const students = (typeof DataService !== 'undefined' && DataService.get) ? (DataService.get('students') || []) : [];
+    const student = students.find(s => s.id === studentId);
+
+    const studentNameStr = student ? ` "${student.name}"` : '';
+    if (!confirm(`Are you sure you want to delete student${studentNameStr}? This action cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        // 1. Delete from Firestore
+        if (typeof db !== 'undefined' && db) {
+            await db.collection('students').doc(studentId).delete();
+        }
+
+        // 2. Update local DataService cache
+        if (typeof DataService !== 'undefined' && DataService.get && DataService.set) {
+            const updatedStudents = students.filter(s => s.id !== studentId);
+            DataService.set('students', updatedStudents);
+        }
+
+        showToast('Student deleted successfully!', 'success');
+
+        // 3. Re-render UI
+        const container = document.getElementById('main-content') || 
+                          document.getElementById('content') || 
+                          document.getElementById('student-registry-container');
+                          
+        if (container && typeof renderStudentRegistry === 'function') {
+            renderStudentRegistry(container);
+        } else if (typeof Router !== 'undefined' && Router.refresh) {
+            Router.refresh();
+        }
+    } catch (error) {
+        console.error('Error deleting student:', error);
+        showToast('Failed to delete student from cloud: ' + error.message, 'error');
+    }
 }
 
 // Real-time Firestore Listener
@@ -2041,97 +2357,6 @@ function getFormInputValue(ids) {
     return '';
 }
 
-// Add or Save Single Student
-async function handleSaveStudent(event) {
-    if (event) event.preventDefault();
-
-    // Query inputs specifically inside the active form to avoid duplicate DOM collisions
-    const form = event?.target || document.getElementById('studentForm');
-    if (!form) {
-        showToast('Form element not found.', 'error');
-        return;
-    }
-
-    const nameInput = form.querySelector('#sname') || document.getElementById('sname');
-    const classInput = form.querySelector('#sclass') || document.getElementById('sclass');
-    const sexInput = form.querySelector('#ssex') || document.getElementById('ssex');
-    const ageInput = form.querySelector('#sage') || document.getElementById('sage');
-    const yearInput = form.querySelector('#sadmission-year') || document.getElementById('sadmission-year');
-    const phoneInput = form.querySelector('#sparent-phone') || document.getElementById('sparent-phone');
-
-    const name = nameInput ? nameInput.value.trim() : '';
-    const className = classInput ? classInput.value.trim() : '';
-
-    if (!name || !className) {
-        showToast('Please fill in required fields (Name and Class)', 'error');
-        return;
-    }
-
-    // Generate a unique Document ID (e.g. BAGSS-8492-1049)
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    const studentId = 'BAGSS-' + Date.now().toString().slice(-4) + '-' + randomSuffix;
-
-    // Create object with key variations so table renders regardless of property name used
-    const studentData = {
-        id: studentId,
-        studentId: studentId,
-        name: name,
-        studentName: name,
-        class: className,
-        className: className,
-        sex: sexInput ? sexInput.value : 'Female',
-        age: ageInput ? ageInput.value : '',
-        admissionYear: yearInput ? yearInput.value : new Date().getFullYear().toString(),
-        parentPhone: phoneInput ? phoneInput.value.trim() : '',
-        phone: phoneInput ? phoneInput.value.trim() : '',
-        status: 'Active',
-        entryDate: new Date().toISOString().split('T')[0],
-        updatedAt: new Date().toISOString()
-    };
-
-    try {
-        // 1. Save document to Firestore using the unique studentId
-        if (typeof db !== 'undefined' && db) {
-            await db.collection('students').doc(studentData.id).set(studentData);
-        } else if (typeof FirestoreService !== 'undefined' && FirestoreService.saveStudent) {
-            await FirestoreService.saveStudent(studentData);
-        } else {
-            throw new Error('Firebase Firestore instance (db) is not defined');
-        }
-
-        // 2. Update local DataService cache for instant UI rendering
-        if (typeof DataService !== 'undefined' && DataService.get && DataService.set) {
-            let currentStudents = DataService.get('students') || [];
-            if (!Array.isArray(currentStudents)) currentStudents = [];
-            
-            currentStudents = currentStudents.filter(s => s.id !== studentData.id);
-            currentStudents.unshift(studentData);
-            DataService.set('students', currentStudents);
-        }
-
-        showToast(`Student ${studentData.name} saved successfully to cloud!`, 'success');
-        
-        if (typeof closeModal === 'function') closeModal();
-
-        // 3. Re-render student registry table
-        const container = document.getElementById('main-content') || 
-                          document.getElementById('content') || 
-                          document.getElementById('student-registry-container');
-                          
-        if (container && typeof renderStudentRegistry === 'function') {
-            renderStudentRegistry(container);
-        }
-    } catch (error) {
-        console.error('Error saving student to Firestore:', error);
-        showToast('Failed to save student: ' + error.message, 'error');
-    }
-}
-
-function saveStudent(event) {
-    return handleSaveStudent(event);
-}
-window.saveStudent = saveStudent;
-
 // Automatically sync student registry from Firestore across all devices on load
 function listenToFirestoreStudents() {
     if (typeof db === 'undefined' || !db.collection) return;
@@ -2159,127 +2384,6 @@ function listenToFirestoreStudents() {
 document.addEventListener('DOMContentLoaded', () => {
     listenToFirestoreStudents();
 });
-
-// Open Edit Student Modal with Cloud Data
-async function openEditStudentModal(studentId) {
-    const students = await DataService.getStudents();
-    const student = students.find(s => s.id === studentId);
-
-    if (!student) {
-        showToast('Student not found!', 'error');
-        return;
-    }
-
-    const modalContent = document.getElementById('modal-content');
-    if (!modalContent) return;
-
-    modalContent.innerHTML = `
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-bold text-gray-800">Edit Student</h3>
-            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        <form onsubmit="handleSaveStudent(event)">
-            <input type="hidden" id="student-id" value="${escapeHtml(student.id)}">
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Student ID</label>
-                    <input type="text" value="${escapeHtml(student.id)}" class="w-full px-3 py-2 border rounded-lg bg-gray-100" disabled>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
-                    <input type="text" id="student-name" value="${escapeHtml(student.name)}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" required>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Class *</label>
-                    <input type="text" id="student-class" value="${escapeHtml(student.class)}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" required>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Parent Phone</label>
-                    <input type="text" id="student-phone" value="${escapeHtml(student.parentPhone || '')}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                    <select id="student-status" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
-                        <option value="Active" ${student.status === 'Active' ? 'selected' : ''}>Active</option>
-                        <option value="Transfer" ${student.status === 'Transfer' ? 'selected' : ''}>Transfer</option>
-                        <option value="Left" ${student.status === 'Left' ? 'selected' : ''}>Left</option>
-                    </select>
-                </div>
-            </div>
-            <div class="mt-6 flex justify-end gap-3">
-                <button type="button" onclick="closeModal()" class="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
-                <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Save Changes</button>
-            </div>
-        </form>
-    `;
-
-    document.getElementById('modal').classList.remove('hidden');
-}
-
-/**
- * Safely deletes a student by unique Student ID.
- */
-function deleteStudent(studentId) {
-    if (!studentId) return;
-
-    const students = DataService.get('students') || [];
-    const student = students.find(s => s.id === studentId);
-
-    const studentNameStr = student ? ` "${student.name}"` : '';
-    if (!confirm(`Are you sure you want to delete student${studentNameStr}? This action cannot be undone.`)) {
-        return;
-    }
-    
-    const updatedStudents = students.filter(s => s.id !== studentId);
-    DataService.set('students', updatedStudents);
-    showToast('Student deleted successfully!', 'success');
-    
-    if (typeof Router !== 'undefined' && Router.refresh) {
-        Router.refresh();
-    } else if (typeof Router !== 'undefined' && Router.navigate) {
-        Router.navigate('students');
-    }
-}
-
-// Open Phone Update Modal with Cloud Data
-async function openPhoneUpdateModal(studentId) {
-    const students = await DataService.getStudents();
-    const student = students.find(s => s.id === studentId);
-
-    if (!student) {
-        showToast('Student not found!', 'error');
-        return;
-    }
-
-    const modalContent = document.getElementById('modal-content');
-    if (!modalContent) return;
-
-    modalContent.innerHTML = `
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-bold text-gray-800">Update Parent Phone</h3>
-            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        <form onsubmit="handleUpdatePhone(event, '${escapeHtml(student.id)}')">
-            <div class="space-y-4">
-                <p class="text-sm text-gray-600">Updating phone for <strong>${escapeHtml(student.name)}</strong> (${escapeHtml(student.id)})</p>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Parent Phone Number</label>
-                    <input type="text" id="update-parent-phone" value="${escapeHtml(student.parentPhone || '')}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="+265..." required>
-                </div>
-            </div>
-            <div class="mt-6 flex justify-end gap-3">
-                <button type="button" onclick="closeModal()" class="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
-                <button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700">Update Phone</button>
-            </div>
-        </form>
-    `;
-
-    document.getElementById('modal').classList.remove('hidden');
-}
 
 // ============================================================================
 // 3. TRANSFER OPERATIONS (IN & OUT)
