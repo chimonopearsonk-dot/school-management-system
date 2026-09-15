@@ -2901,11 +2901,22 @@ function showTransferStudentModal() {
 }
 
 /**
- * Saves a new incoming transfer student record.
+ * Alias wrapper to ensure legacy/other function calls redirect to permanent generator
  */
-function saveTransferStudent(e) {
+function generateNextStudentId(studentClass = '', isTransfer = true, admissionYear = new Date().getFullYear()) {
+    if (typeof generatePermanentStudentId === 'function') {
+        return generatePermanentStudentId(admissionYear, isTransfer);
+    }
+    return `BAGSS/${admissionYear}/${isTransfer ? 'T' : ''}001`;
+}
+window.generateNextStudentId = generateNextStudentId;
+
+/**
+ * Saves a new incoming transfer student record with unique BAGSS/{Year}/T{Serial} ID
+ */
+async function saveTransferStudent(e) {
     e.preventDefault();
-    
+
     const name = document.getElementById('sname').value.trim();
     const studentClass = document.getElementById('sclass').value.trim();
     const sex = document.getElementById('ssex').value;
@@ -2916,34 +2927,81 @@ function saveTransferStudent(e) {
     const transferDate = document.getElementById('stransfer-date').value || new Date().toISOString().split('T')[0];
 
     if (!name || !studentClass || !sex || isNaN(age) || !parentPhone) {
-        showToast('Please fill all required fields', 'error');
+        if (typeof showToast === 'function') showToast('Please fill all required fields', 'error');
         return;
     }
 
-    let students = DataService.get('students') || [];
-    const newId = generateNextStudentId(studentClass, true, admissionYear);
+    // 1. Generate unique Transfer ID (e.g., BAGSS/2026/T001)
+    const newId = typeof generatePermanentStudentId === 'function'
+        ? generatePermanentStudentId(admissionYear, true)
+        : `BAGSS/${admissionYear}/T001`;
 
     const newStudent = {
         id: newId,
+        studentId: newId,
         name: name,
+        studentName: name,
         class: studentClass,
+        className: studentClass,
         sex: sex,
         age: age,
         parentPhone: parentPhone,
-        admissionYear: admissionYear,
-        admissionDate: transferDate,
+        phone: parentPhone,
+        admissionYear: String(admissionYear),
         status: 'Transfer',
         previousSchool: prevSchool,
-        transferDate: transferDate
+        transferDate: transferDate,
+        entryDate: transferDate,
+        updatedAt: new Date().toISOString()
     };
 
-    students.push(newStudent);
-    DataService.set('students', students);
-    
-    closeModal();
-    showToast('Transfer student added successfully!', 'success');
-    if (typeof Router !== 'undefined' && Router.refresh) Router.refresh();
+    try {
+        // 2. Save to Firestore Cloud DB (if available)
+        if (typeof db !== 'undefined' && db) {
+            await db.collection('students').doc(newId).set(newStudent, { merge: true });
+        }
+
+        // 3. Update Memory Cache and Local Storage
+        let currentStudents = (typeof DataService !== 'undefined' && DataService.get) 
+            ? (DataService.get('students') || []) 
+            : JSON.parse(localStorage.getItem('students') || '[]');
+
+        // Check and replace existing record or append
+        const existingIdx = currentStudents.findIndex(s => s.id === newId);
+        if (existingIdx >= 0) {
+            currentStudents[existingIdx] = newStudent;
+        } else {
+            currentStudents.push(newStudent);
+        }
+
+        if (typeof sortStudentCohort === 'function') {
+            currentStudents = sortStudentCohort(currentStudents);
+        }
+
+        if (typeof DataService !== 'undefined' && DataService.set) {
+            DataService.set('students', currentStudents);
+        }
+        localStorage.setItem('students', JSON.stringify(currentStudents));
+
+        // 4. UI Cleanup and Feedback
+        if (typeof closeModal === 'function') closeModal();
+        if (typeof showToast === 'function') showToast(`Transfer student added: ${newId}`, 'success');
+
+        // 5. Trigger View Sync Across Registry & Dashboard
+        if (typeof syncAllStudentViews === 'function') {
+            syncAllStudentViews(currentStudents);
+        } else if (typeof renderStudentRegistry === 'function') {
+            const container = document.getElementById('student-registry-container')?.parentElement 
+                           || document.getElementById('main-content') 
+                           || document.getElementById('content');
+            renderStudentRegistry(container, currentStudents);
+        }
+    } catch (err) {
+        console.error('Failed to save transfer student:', err);
+        if (typeof showToast === 'function') showToast('Error saving transfer student: ' + err.message, 'error');
+    }
 }
+window.saveTransferStudent = saveTransferStudent;
 
 /**
  * Modal to process transferring a student out to another school.
