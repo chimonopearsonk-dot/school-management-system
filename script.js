@@ -2266,7 +2266,7 @@ function generatePermanentStudentId(admissionYear = new Date().getFullYear(), is
 }
 
 /**
- * Real-time Firestore Listener: Keeps DataService cache updated
+ * Real-time Firestore Listener: Keeps DataService & LocalStorage updated
  * and triggers instant UI sync across all active views.
  */
 function listenToStudentRegistry(containerId = 'main-content') {
@@ -2276,22 +2276,29 @@ function listenToStudentRegistry(containerId = 'main-content') {
         const cloudStudents = [];
         snapshot.forEach(doc => {
             if (doc.exists) {
-                cloudStudents.push(doc.data());
+                const data = doc.data();
+                const docId = doc.id || data.id || data.studentId;
+                cloudStudents.push({
+                    id: docId,
+                    studentId: docId,
+                    ...data
+                });
             }
         });
 
         const sortedStudents = sortStudentCohort(cloudStudents);
 
-        // 1. Instantly update local DataService cache
+        // 1. Instantly update both local DataService memory cache AND localStorage
         if (typeof DataService !== 'undefined' && DataService.set) {
             DataService.set('students', sortedStudents);
         }
+        localStorage.setItem('students', JSON.stringify(sortedStudents));
 
         // 2. Re-render Registry if active in DOM
         const registryContainer = document.getElementById('student-registry-container') || 
-                                  document.getElementById(containerId) || 
-                                  document.getElementById('content');
-                                  
+                                   document.getElementById(containerId) || 
+                                   document.getElementById('content');
+                                   
         if (registryContainer && (
             document.getElementById('student-table-body') || 
             document.getElementById('student-search') ||
@@ -2302,7 +2309,7 @@ function listenToStudentRegistry(containerId = 'main-content') {
 
         // 3. Re-render Dashboard if active in DOM
         const dashboardContainer = document.getElementById('recent-students-container') || 
-                                   document.getElementById('recent-students-list');
+                                    document.getElementById('recent-students-list');
         if (dashboardContainer) {
             dashboardContainer.innerHTML = createRecentStudentsTable(sortedStudents.slice(0, 5));
         }
@@ -2310,147 +2317,46 @@ function listenToStudentRegistry(containerId = 'main-content') {
         console.error("Real-time sync error:", error);
     });
 }
+window.listenToStudentRegistry = listenToStudentRegistry;
 
-// ============================================================================
-//  VIEWS & RENDERING COMPONENTS
-// ============================================================================
-
-/**
- * Manual Refresh Trigger: Fetches fresh data directly from Firestore
- * and synchronizes both Student Registry and Dashboard tables simultaneously.
- */
-async function refreshStudentRegistry() {
-    const refreshBtn = document.getElementById('refresh-students-btn');
-    if (refreshBtn) {
-        refreshBtn.disabled = true;
-        refreshBtn.innerHTML = `<i class="fas fa-spinner fa-spin mr-1"></i> Refreshing...`;
-    }
-
-    try {
-        let cloudStudents = [];
-        if (typeof db !== 'undefined' && db) {
-            const snapshot = await db.collection('students').get();
-            snapshot.forEach(doc => {
-                if (doc.exists) cloudStudents.push(doc.data());
-            });
-        } else if (typeof DataService !== 'undefined' && DataService.getStudents) {
-            cloudStudents = await DataService.getStudents();
-        }
-
-        const sortedStudents = sortStudentCohort(cloudStudents);
-
-        // Update local memory cache
-        if (typeof DataService !== 'undefined' && DataService.set) {
-            DataService.set('students', sortedStudents);
-        }
-
-        // Re-render Registry Table
-        const registryContainer = document.getElementById('student-registry-container') || 
-                                  document.getElementById('main-content') || 
-                                  document.getElementById('content');
-        if (registryContainer) {
-            renderStudentRegistry(registryContainer, sortedStudents);
-        }
-
-        // Re-render Dashboard Recent Table
-        const dashboardContainer = document.getElementById('recent-students-container') || 
-                                   document.getElementById('recent-students-list');
-        if (dashboardContainer) {
-            dashboardContainer.innerHTML = createRecentStudentsTable(sortedStudents.slice(0, 5));
-        }
-
-        if (typeof showToast === 'function') {
-            showToast('Student registry refreshed from cloud!', 'success');
-        }
-    } catch (error) {
-        console.error('Failed to refresh student registry:', error);
-        if (typeof showToast === 'function') {
-            showToast('Failed to refresh data: ' + error.message, 'error');
-        }
-    } finally {
-        if (refreshBtn) {
-            refreshBtn.disabled = false;
-            refreshBtn.innerHTML = `<i class="fas fa-sync-alt mr-1"></i> Refresh`;
-        }
-    }
-}
-window.refreshStudentRegistry = refreshStudentRegistry;
-
-
-// Automatically sync student registry from Firestore across all devices on load
-function listenToFirestoreStudents() {
-    if (typeof db === 'undefined' || !db.collection) return;
-
-    db.collection('students').onSnapshot((snapshot) => {
-        const cloudStudents = [];
-        snapshot.forEach((doc) => {
-            cloudStudents.push(doc.data());
-        });
-
-        if (typeof DataService !== 'undefined' && DataService.set) {
-            DataService.set('students', cloudStudents);
-        }
-
-        const container = document.getElementById('main-content') || document.getElementById('student-registry-container');
-        if (container && typeof renderStudentRegistry === 'function' && Router?.current === 'students') {
-            renderStudentRegistry(container);
-        }
-    }, (error) => {
-        console.error('Firestore students listener error:', error);
-    });
-}
-
-// Attach listener when app starts
+// Attach single listener when app loads
 document.addEventListener('DOMContentLoaded', () => {
-    listenToFirestoreStudents();
+    listenToStudentRegistry();
 });
 
 /**
- * Keeps DataService and localStorage synced across tab/view navigation
+ * Helper: Universal Student Lookup by ID
  */
-function syncAllStudentViews(studentsList = null) {
-    let students = studentsList;
+async function findStudentById(targetId) {
+    if (!targetId) return null;
+    const cleanTargetId = String(targetId).trim();
 
-    if (!students) {
-        if (typeof DataService !== 'undefined' && DataService.get) {
-            students = DataService.get('students');
-        }
-        if (!students || students.length === 0) {
-            students = JSON.parse(localStorage.getItem('students') || '[]');
-        }
+    // 1. Check DataService
+    let students = [];
+    if (typeof DataService !== 'undefined' && DataService.getStudents) {
+        students = await DataService.getStudents();
+    }
+    if (!students || students.length === 0) {
+        students = (typeof DataService !== 'undefined' && DataService.get) 
+            ? DataService.get('students') 
+            : [];
+    }
+    // 2. Fallback to localStorage
+    if (!students || students.length === 0) {
+        students = JSON.parse(localStorage.getItem('students') || '[]');
     }
 
-    const sortedStudents = sortStudentCohort(students || []);
-
-    // Update memory caches
-    if (typeof DataService !== 'undefined' && DataService.set) {
-        DataService.set('students', sortedStudents);
-    }
-    localStorage.setItem('students', JSON.stringify(sortedStudents));
-
-    // Render Registry View if visible
-    const registryContainer = document.getElementById('student-registry-container') || 
-                              document.getElementById('main-content') || 
-                              document.getElementById('content');
-
-    if (registryContainer && (document.getElementById('student-table-body') || registryContainer.querySelector('table'))) {
-        renderStudentRegistry(registryContainer, sortedStudents);
-    }
-
-    // Render Dashboard View if visible
-    const dashboardContainer = document.getElementById('recent-students-container') || 
-                               document.getElementById('recent-students-list');
-
-    if (dashboardContainer) {
-        dashboardContainer.innerHTML = createRecentStudentsTable(sortedStudents.slice(0, 5));
-    }
+    return students.find(s => {
+        const sId = String(s.id || s.studentId || '').trim();
+        return sId === cleanTargetId;
+    }) || null;
 }
-window.syncAllStudentViews = syncAllStudentViews;
 
-// Open Edit Student Modal with Cloud Data
+/**
+ * Open Edit Student Modal with Flexible ID Resolution
+ */
 async function openEditStudentModal(studentId) {
-    const students = await DataService.getStudents();
-    const student = students.find(s => s.id === studentId);
+    const student = await findStudentById(studentId);
 
     if (!student) {
         showToast('Student not found!', 'error');
@@ -2460,6 +2366,8 @@ async function openEditStudentModal(studentId) {
     const modalContent = document.getElementById('modal-content');
     if (!modalContent) return;
 
+    const currentId = student.id || student.studentId;
+
     modalContent.innerHTML = `
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-bold text-gray-800">Edit Student</h3>
@@ -2468,15 +2376,15 @@ async function openEditStudentModal(studentId) {
             </button>
         </div>
         <form onsubmit="handleSaveStudent(event)">
-            <input type="hidden" id="student-id" value="${escapeHtml(student.id)}">
+            <input type="hidden" id="student-id" value="${escapeHtml(currentId)}">
             <div class="space-y-4">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Student ID</label>
-                    <input type="text" value="${escapeHtml(student.id)}" class="w-full px-3 py-2 border rounded-lg bg-gray-100" disabled>
+                    <input type="text" value="${escapeHtml(currentId)}" class="w-full px-3 py-2 border rounded-lg bg-gray-100" disabled>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
-                    <input type="text" id="student-name" value="${escapeHtml(student.name)}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" required>
+                    <input type="text" id="student-name" value="${escapeHtml(student.name || student.studentName || '')}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" required>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Class *</label>
@@ -2508,11 +2416,13 @@ async function openEditStudentModal(studentId) {
         modal.style.display = 'flex';
     }
 }
+window.openEditStudentModal = openEditStudentModal;
 
-// Open Phone Update Modal with Cloud Data
+/**
+ * Open Phone Update Modal with Flexible ID Resolution
+ */
 async function openPhoneUpdateModal(studentId) {
-    const students = await DataService.getStudents();
-    const student = students.find(s => s.id === studentId);
+    const student = await findStudentById(studentId);
 
     if (!student) {
         showToast('Student not found!', 'error');
@@ -2522,6 +2432,8 @@ async function openPhoneUpdateModal(studentId) {
     const modalContent = document.getElementById('modal-content');
     if (!modalContent) return;
 
+    const currentId = student.id || student.studentId;
+
     modalContent.innerHTML = `
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-bold text-gray-800">Update Parent Phone</h3>
@@ -2529,9 +2441,9 @@ async function openPhoneUpdateModal(studentId) {
                 <i class="fas fa-times"></i>
             </button>
         </div>
-        <form onsubmit="handleUpdatePhone(event, '${escapeHtml(student.id)}')">
+        <form onsubmit="handleUpdatePhone(event, '${escapeHtml(currentId)}')">
             <div class="space-y-4">
-                <p class="text-sm text-gray-600">Updating phone for <strong>${escapeHtml(student.name)}</strong> (${escapeHtml(student.id)})</p>
+                <p class="text-sm text-gray-600">Updating phone for <strong>${escapeHtml(student.name || student.studentName || '')}</strong> (${escapeHtml(currentId)})</p>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Parent Phone Number</label>
                     <input type="text" id="update-parent-phone" value="${escapeHtml(student.parentPhone || student.phone || '')}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="+265..." required>
@@ -2550,8 +2462,11 @@ async function openPhoneUpdateModal(studentId) {
         modal.style.display = 'flex';
     }
 }
+window.openPhoneUpdateModal = openPhoneUpdateModal;
 
-// Handle Phone Number Update
+/**
+ * Handle Phone Number Update across Cloud & Local Caches
+ */
 async function handleUpdatePhone(event, studentId) {
     if (event) event.preventDefault();
 
@@ -2570,42 +2485,43 @@ async function handleUpdatePhone(event, studentId) {
             }, { merge: true });
         }
 
-        // 2. Update in DataService local cache
-        if (typeof DataService !== 'undefined' && DataService.get && DataService.set) {
-            let students = DataService.get('students') || [];
-            const studentIndex = students.findIndex(s => s.id === studentId);
-            if (studentIndex >= 0) {
-                students[studentIndex].parentPhone = newPhone;
-                students[studentIndex].phone = newPhone;
+        // 2. Update in DataService local cache & localStorage
+        let students = (typeof DataService !== 'undefined' && DataService.get) 
+            ? (DataService.get('students') || []) 
+            : JSON.parse(localStorage.getItem('students') || '[]');
+
+        const studentIndex = students.findIndex(s => String(s.id || s.studentId).trim() === String(studentId).trim());
+        if (studentIndex >= 0) {
+            students[studentIndex].parentPhone = newPhone;
+            students[studentIndex].phone = newPhone;
+            
+            if (typeof DataService !== 'undefined' && DataService.set) {
                 DataService.set('students', students);
             }
+            localStorage.setItem('students', JSON.stringify(students));
         }
 
         showToast('Parent phone updated successfully!', 'success');
         if (typeof closeModal === 'function') closeModal();
 
-        // 3. Refresh Table
-        const container = document.getElementById('main-content') || 
-                          document.getElementById('content') || 
-                          document.getElementById('student-registry-container');
-                          
-        if (container && typeof renderStudentRegistry === 'function') {
-            renderStudentRegistry(container);
-        }
+        // 3. Sync Views
+        syncAllStudentViews(students);
     } catch (error) {
         console.error('Error updating phone:', error);
         showToast('Failed to update phone: ' + error.message, 'error');
     }
 }
+window.handleUpdatePhone = handleUpdatePhone;
 
-// Safely deletes a student from Firestore & DataService by unique Student ID
+/**
+ * Safely deletes a student by ID
+ */
 async function deleteStudent(studentId) {
     if (!studentId) return;
 
-    const students = (typeof DataService !== 'undefined' && DataService.get) ? (DataService.get('students') || []) : [];
-    const student = students.find(s => s.id === studentId);
+    const student = await findStudentById(studentId);
+    const studentNameStr = student ? ` "${student.name || student.studentName}"` : '';
 
-    const studentNameStr = student ? ` "${student.name}"` : '';
     if (!confirm(`Are you sure you want to delete student${studentNameStr}? This action cannot be undone.`)) {
         return;
     }
@@ -2616,30 +2532,29 @@ async function deleteStudent(studentId) {
             await db.collection('students').doc(studentId).delete();
         }
 
-        // 2. Update local DataService cache
-        if (typeof DataService !== 'undefined' && DataService.get && DataService.set) {
-            const updatedStudents = students.filter(s => s.id !== studentId);
+        // 2. Update local caches
+        let students = (typeof DataService !== 'undefined' && DataService.get) 
+            ? (DataService.get('students') || []) 
+            : JSON.parse(localStorage.getItem('students') || '[]');
+
+        const updatedStudents = students.filter(s => String(s.id || s.studentId).trim() !== String(studentId).trim());
+
+        if (typeof DataService !== 'undefined' && DataService.set) {
             DataService.set('students', updatedStudents);
         }
+        localStorage.setItem('students', JSON.stringify(updatedStudents));
 
         showToast('Student deleted successfully!', 'success');
 
         // 3. Re-render UI
-        const container = document.getElementById('main-content') || 
-                          document.getElementById('content') || 
-                          document.getElementById('student-registry-container');
-                          
-        if (container && typeof renderStudentRegistry === 'function') {
-            renderStudentRegistry(container);
-        } else if (typeof Router !== 'undefined' && Router.refresh) {
-            Router.refresh();
-        }
+        syncAllStudentViews(updatedStudents);
     } catch (error) {
         console.error('Error deleting student:', error);
         showToast('Failed to delete student from cloud: ' + error.message, 'error');
     }
 }
- 
+window.deleteStudent = deleteStudent;
+
 /**
  * Recent Students Table Snippet for Dashboard
  */
