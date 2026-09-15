@@ -1909,14 +1909,12 @@ function setupDropZoneEvents() {
 window.pendingImportData = [];
 
 /**
- * Flexible Column Normalizer
- * Maps various Excel/CSV header names to unified student properties.
+ * Normalizes Excel/CSV rows and falls back to selected Modal Class if missing.
  */
-function normalizeBulkImportData(rawRows) {
+function normalizeBulkImportData(rawRows, fallbackClass = '') {
     if (!Array.isArray(rawRows)) return [];
 
     return rawRows.map(row => {
-        // Helper to match key variations (case-insensitive)
         const getValue = (possibleHeaders) => {
             for (const key of Object.keys(row)) {
                 const cleanKey = key.trim().toLowerCase();
@@ -1928,9 +1926,14 @@ function normalizeBulkImportData(rawRows) {
         };
 
         const name = getValue(['name', 'student name', 'full name', 'fullname', 'student_name', 'student']);
-        const className = getValue(['class', 'classname', 'class name', 'grade', 'form', 'stream']);
-        const rawSex = getValue(['sex', 'gender', 'm/f']);
         
+        // Check row for class; if missing, use the modal's selected class fallback
+        let className = getValue(['class', 'classname', 'class name', 'grade', 'form', 'stream']);
+        if (!className) {
+            className = fallbackClass;
+        }
+
+        const rawSex = getValue(['sex', 'gender', 'm/f']);
         let sex = 'Female';
         if (rawSex) {
             const s = rawSex.toLowerCase();
@@ -1938,7 +1941,7 @@ function normalizeBulkImportData(rawRows) {
             else if (s.startsWith('f') || s === 'girl') sex = 'Female';
         }
 
-        const phone = getValue(['phone', 'parent phone', 'parentphone', 'phone number', 'contact', 'mobile', 'parent contact']);
+        const phone = getValue(['phone', 'parent phone', 'parentphone', 'phone number', 'contact', 'mobile']);
         const status = getValue(['status', 'type', 'enrollment status']) || 'Active';
         const age = getValue(['age', 'years']);
 
@@ -1953,7 +1956,7 @@ function normalizeBulkImportData(rawRows) {
             status: status,
             age: age
         };
-    }).filter(s => s.name.length > 0); // Drop rows without a name
+    }).filter(s => s.name.length > 0);
 }
 
 /**
@@ -1987,7 +1990,7 @@ function handleBulkFileSelect(event) {
             }
 
             // Normalize and save parsed entries
-            window.pendingImportData = normalizeBulkImportData(rawJson);
+            window.pendingImportData = normalizeBulkImportData(rawJson, window.selectedModalClass);
 
             // Update UI State & Dropzone
             updateBulkImportUI(file.name, window.pendingImportData.length);
@@ -2105,25 +2108,32 @@ function parseCSVToObjects(csvText) {
 }
 
 /**
- * Triggered by the "Process Import" Button
+ * Processes Bulk Import with Modal Class Fallback and Permanent Local Storage Persistence
  */
 async function processBulkImport(rawStudentList = null, defaultYear = new Date().getFullYear()) {
-    // Fall back to memory if list was not passed directly
+    // 1. Detect selected class from Modal Dropdown (if present)
+    const modalClassSelect = document.getElementById('bulk-import-class') || 
+                             document.getElementById('bulk-class-select') || 
+                             document.getElementById('import-class') ||
+                             document.getElementById('student-class');
+    const selectedModalClass = modalClassSelect ? modalClassSelect.value.trim() : '';
+
+    // 2. Fetch data from memory or parameters
     const listToProcess = (Array.isArray(rawStudentList) && rawStudentList.length > 0) 
         ? rawStudentList 
-        : window.pendingImportData;
+        : (window.pendingImportData || []);
 
-    const normalizedList = normalizeBulkImportData(listToProcess);
+    const normalizedList = normalizeBulkImportData(listToProcess, selectedModalClass);
 
     if (!normalizedList || normalizedList.length === 0) {
-        showToast('No valid student data found to import. Please select a valid CSV or Excel file first.', 'error');
+        showToast('No valid student data found. Please select a valid file first.', 'error');
         return;
     }
 
-    // 1. Sort cohort FIRST (Females first, then A-Z)
+    // 3. Sort Cohort (Females first, then A-Z)
     const sortedCohort = sortStudentCohort(normalizedList);
 
-    // 2. Assign Permanent Sequential IDs
+    // 4. Assign Permanent Sequential IDs
     const preparedStudents = sortedCohort.map((student, index) => {
         const isTransfer = student.status === 'Transfer';
         const permanentId = generatePermanentStudentId(defaultYear, isTransfer, index);
@@ -2133,8 +2143,8 @@ async function processBulkImport(rawStudentList = null, defaultYear = new Date()
             studentId: permanentId,
             name: student.name,
             studentName: student.name,
-            class: student.class || 'Unassigned',
-            className: student.class || 'Unassigned',
+            class: student.class || selectedModalClass || 'Unassigned',
+            className: student.class || selectedModalClass || 'Unassigned',
             sex: student.sex || 'Female',
             age: student.age || '',
             admissionYear: String(defaultYear),
@@ -2147,7 +2157,7 @@ async function processBulkImport(rawStudentList = null, defaultYear = new Date()
     });
 
     try {
-        // 3. Save to Firestore Batch
+        // 5. Batch Save to Firestore
         if (typeof db !== 'undefined' && db) {
             const batch = db.batch();
             preparedStudents.forEach(st => {
@@ -2157,9 +2167,11 @@ async function processBulkImport(rawStudentList = null, defaultYear = new Date()
             await batch.commit();
         }
 
-        // 4. Update Local Memory Cache
-        let currentStudents = (typeof DataService !== 'undefined' && DataService.get) ? (DataService.get('students') || []) : [];
-        
+        // 6. Merge with Local Cache & Save to Persistent Storage
+        let currentStudents = (typeof DataService !== 'undefined' && DataService.get) 
+            ? (DataService.get('students') || []) 
+            : JSON.parse(localStorage.getItem('students') || '[]');
+
         preparedStudents.forEach(newSt => {
             const idx = currentStudents.findIndex(s => s.id === newSt.id);
             if (idx >= 0) {
@@ -2170,17 +2182,21 @@ async function processBulkImport(rawStudentList = null, defaultYear = new Date()
         });
 
         currentStudents = sortStudentCohort(currentStudents);
+
+        // Update DataService & LocalStorage so view changes don't lose data
         if (typeof DataService !== 'undefined' && DataService.set) {
             DataService.set('students', currentStudents);
         }
+        localStorage.setItem('students', JSON.stringify(currentStudents));
 
-        // Reset memory buffer
+        // Reset memory buffer & close modal
         window.pendingImportData = [];
-
-        showToast(`Successfully imported ${preparedStudents.length} students with permanent IDs!`, 'success');
         if (typeof closeModal === 'function') closeModal();
+        if (typeof resetBulkImportUI === 'function') resetBulkImportUI();
 
-        // 5. Synchronize both UI views immediately
+        showToast(`Successfully imported ${preparedStudents.length} students!`, 'success');
+
+        // 7. Synchronize UI Views
         syncAllStudentViews(currentStudents);
 
     } catch (error) {
@@ -2389,29 +2405,47 @@ document.addEventListener('DOMContentLoaded', () => {
     listenToFirestoreStudents();
 });
 
-
 /**
- * Synchronizes and updates all active student tables in the DOM simultaneously.
+ * Keeps DataService and localStorage synced across tab/view navigation
  */
 function syncAllStudentViews(studentsList = null) {
-    const students = sortStudentCohort(studentsList || (DataService.get ? DataService.get('students') : []));
+    let students = studentsList;
 
-    // 1. Update Student Registry if container exists
+    if (!students) {
+        if (typeof DataService !== 'undefined' && DataService.get) {
+            students = DataService.get('students');
+        }
+        if (!students || students.length === 0) {
+            students = JSON.parse(localStorage.getItem('students') || '[]');
+        }
+    }
+
+    const sortedStudents = sortStudentCohort(students || []);
+
+    // Update memory caches
+    if (typeof DataService !== 'undefined' && DataService.set) {
+        DataService.set('students', sortedStudents);
+    }
+    localStorage.setItem('students', JSON.stringify(sortedStudents));
+
+    // Render Registry View if visible
     const registryContainer = document.getElementById('student-registry-container') || 
                               document.getElementById('main-content') || 
                               document.getElementById('content');
-                              
+
     if (registryContainer && (document.getElementById('student-table-body') || registryContainer.querySelector('table'))) {
-        renderStudentRegistry(registryContainer, students);
+        renderStudentRegistry(registryContainer, sortedStudents);
     }
 
-    // 2. Update Dashboard Recent Students Table if container exists
+    // Render Dashboard View if visible
     const dashboardContainer = document.getElementById('recent-students-container') || 
                                document.getElementById('recent-students-list');
+
     if (dashboardContainer) {
-        dashboardContainer.innerHTML = createRecentStudentsTable(students.slice(0, 5));
+        dashboardContainer.innerHTML = createRecentStudentsTable(sortedStudents.slice(0, 5));
     }
 }
+window.syncAllStudentViews = syncAllStudentViews;
 
 // Open Edit Student Modal with Cloud Data
 async function openEditStudentModal(studentId) {
