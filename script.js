@@ -2353,6 +2353,48 @@ async function findStudentById(targetId) {
 }
 
 /**
+ * Keeps DataService and localStorage synced across tab/view navigation
+ */
+function syncAllStudentViews(studentsList = null) {
+    let students = studentsList;
+
+    if (!students) {
+        if (typeof DataService !== 'undefined' && DataService.get) {
+            students = DataService.get('students');
+        }
+        if (!students || students.length === 0) {
+            students = JSON.parse(localStorage.getItem('students') || '[]');
+        }
+    }
+
+    const sortedStudents = sortStudentCohort(students || []);
+
+    // Update memory caches
+    if (typeof DataService !== 'undefined' && DataService.set) {
+        DataService.set('students', sortedStudents);
+    }
+    localStorage.setItem('students', JSON.stringify(sortedStudents));
+
+    // Render Registry View if visible
+    const registryContainer = document.getElementById('student-registry-container') || 
+                              document.getElementById('main-content') || 
+                              document.getElementById('content');
+
+    if (registryContainer && (document.getElementById('student-table-body') || registryContainer.querySelector('table'))) {
+        renderStudentRegistry(registryContainer, sortedStudents);
+    }
+
+    // Render Dashboard View if visible
+    const dashboardContainer = document.getElementById('recent-students-container') || 
+                               document.getElementById('recent-students-list');
+
+    if (dashboardContainer) {
+        dashboardContainer.innerHTML = createRecentStudentsTable(sortedStudents.slice(0, 5));
+    }
+}
+window.syncAllStudentViews = syncAllStudentViews;
+
+/**
  * Open Edit Student Modal with Flexible ID Resolution
  */
 async function openEditStudentModal(studentId) {
