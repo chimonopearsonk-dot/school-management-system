@@ -1437,133 +1437,152 @@ if (typeof DataService !== 'undefined' && !DataService.getStudents) {
 }
 
 /**
- * Main Student Registry Table View
+ * Renders the Student Registry with Class Grouping, Class Totals, and Persistent Data Retrieval
  */
-async function renderStudentRegistry(container, passedStudents = null) {
+async function renderStudentRegistry(container, studentsList = null) {
     if (!container) return;
 
-    let students = passedStudents;
-    if (!students) {
+    // 1. Auto-fetch stored data if tab switch or router called function without passing students
+    let students = studentsList;
+    if (!students || !Array.isArray(students) || students.length === 0) {
         if (typeof DataService !== 'undefined' && DataService.getStudents) {
             students = await DataService.getStudents();
-        } else {
-            students = (typeof DataService !== 'undefined' && DataService.get) ? (DataService.get('students') || []) : [];
+        }
+        if (!students || students.length === 0) {
+            students = (typeof DataService !== 'undefined' && DataService.get) 
+                ? (DataService.get('students') || []) 
+                : JSON.parse(localStorage.getItem('students') || '[]');
         }
     }
 
-    const sortedStudents = sortStudentCohort(students || []);
-    const activeStudents = sortedStudents.filter(s => s.status !== 'Left');
-    const leftStudents = sortedStudents.filter(s => s.status === 'Left');
-    
-    const uniqueClasses = [...new Set(sortedStudents.map(s => s.class || s.className))].filter(Boolean).sort();
+    // Sort cohort (Female first, A-Z)
+    const sortedStudents = typeof sortStudentCohort === 'function' 
+        ? sortStudentCohort(students) 
+        : students;
 
-    const currentSearch = document.getElementById('student-search')?.value || '';
-    const currentClass = document.getElementById('student-class-filter')?.value || '';
-    const currentStatus = document.getElementById('student-status-filter')?.value || 'active';
+    // Group students by Class
+    const classGroups = sortedStudents.reduce((groups, student) => {
+        const className = (student.class || student.className || 'Unassigned').trim();
+        if (!groups[className]) groups[className] = [];
+        groups[className].push(student);
+        return groups;
+    }, {});
 
-    container.innerHTML = `
-        <div class="bg-white rounded-2xl shadow">
-            <div class="p-4 border-b">
-                <div class="flex flex-wrap gap-3 items-center justify-between">
-                    <div class="flex flex-wrap gap-3 items-center flex-1">
-                        <div class="flex-1 min-w-[200px]">
-                            <div class="relative">
-                                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
-                                <input type="text" id="student-search" 
-                                       class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                       placeholder="Search by ID, Name, Class, or Phone..." 
-                                       value="${escapeHtml(currentSearch)}"
-                                       oninput="filterStudentTable()">
-                            </div>
-                        </div>
-                        <select id="student-class-filter" class="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" onchange="filterStudentTable()">
-                            <option value="">All Classes</option>
-                            ${uniqueClasses.map(cls => `<option value="${escapeHtml(cls)}" ${cls === currentClass ? 'selected' : ''}>${escapeHtml(cls)}</option>`).join('')}
-                        </select>
-                        <select id="student-status-filter" class="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" onchange="filterStudentTable()">
-                            <option value="active" ${currentStatus === 'active' ? 'selected' : ''}>Active Only</option>
-                            <option value="left" ${currentStatus === 'left' ? 'selected' : ''}>Left Only</option>
-                            <option value="all" ${currentStatus === 'all' ? 'selected' : ''}>All (including Left)</option>
-                        </select>
-                    </div>
-                    
-                    <div class="flex gap-2 flex-wrap">
-                        <button id="refresh-students-btn" onclick="refreshStudentRegistry()" class="bg-gray-100 text-gray-700 border border-gray-300 px-3.5 py-2.5 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1.5" title="Refresh data from cloud">
-                            <i class="fas fa-sync-alt"></i> Refresh
-                        </button>
-                        <button onclick="showAddStudentModal()" class="bg-indigo-600 text-white px-4 py-2.5 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
-                            <i class="fas fa-plus"></i> Add Student
-                        </button>
-                        <button onclick="showTransferStudentModal()" class="bg-purple-600 text-white px-4 py-2.5 rounded-lg hover:bg-purple-700 flex items-center gap-2">
-                            <i class="fas fa-arrow-right"></i> Transfer In
-                        </button>
-                        <button onclick="showBulkUploadModal()" class="bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 flex items-center gap-2">
-                            <i class="fas fa-upload"></i> Bulk Import
-                        </button>
-                        <button onclick="exportStudentsToCSV()" class="bg-slate-700 text-white px-4 py-2.5 rounded-lg hover:bg-slate-800 flex items-center gap-2" title="Export Register to CSV">
-                            <i class="fas fa-file-excel"></i> Export CSV
-                        </button>
-                    </div>
+    const classNames = Object.keys(classGroups).sort();
+    const totalCount = sortedStudents.length;
+
+    // Build Registry HTML Structure
+    let html = `
+        <div id="student-registry-container" class="space-y-6">
+            <!-- Header Summary Bar -->
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100 gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-gray-800">Student Registry</h2>
+                    <p class="text-sm text-gray-500">Total Registered Students: <span class="font-semibold text-indigo-600">${totalCount}</span></p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    ${classNames.map(cls => `
+                        <span class="px-3 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-full border border-indigo-100">
+                            ${escapeHtml(cls)}: ${classGroups[cls].length}
+                        </span>
+                    `).join('')}
                 </div>
             </div>
-            
-            <div class="overflow-x-auto">
-                <table class="table w-full border-collapse">
-                    <thead>
-                        <tr class="bg-gray-50 border-b">
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Student ID</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Full Name</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Class</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Parent Phone</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Status</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="student-table-body">
-                        ${sortedStudents.length === 0 ? `
-                            <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No students found in registry. Click "+ Add Student" or "Refresh".</td></tr>
-                        ` : sortedStudents.map((student, index) => `
-                            <tr class="${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-indigo-50 ${student.status === 'Left' ? 'opacity-60' : ''}" data-id="${escapeHtml(student.id || '')}" data-status="${escapeHtml(student.status || 'Active')}">
-                                <td class="px-4 py-3 text-sm font-mono">${escapeHtml(student.id || student.studentId || 'N/A')}</td>
-                                <td class="px-4 py-3 text-sm font-medium">${escapeHtml(student.name || student.studentName || '')}</td>
-                                <td class="px-4 py-3 text-sm">
-                                    <span class="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-semibold">${escapeHtml(student.class || student.className || '')}</span>
-                                </td>
-                                <td class="px-4 py-3 text-sm">
-                                    <span class="font-mono text-sm">${(student.parentPhone || student.phone) ? escapeHtml(formatPhoneForDisplay(student.parentPhone || student.phone)) : 'N/A'}</span>
-                                </td>
-                                <td class="px-4 py-3 text-sm">
-                                    <span class="px-2 py-1 ${student.status === 'Active' ? 'bg-green-100 text-green-800' : student.status === 'Transfer' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'} rounded-full text-xs font-semibold">
-                                        ${escapeHtml(student.status || 'Active')}
-                                    </span>
-                                </td>
-                                <td class="px-4 py-3 text-sm">
-                                    <button onclick="openEditStudentModal('${escapeHtml(student.id)}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Edit Student">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                    <button onclick="openPhoneUpdateModal('${escapeHtml(student.id)}')" class="text-amber-600 hover:text-amber-800 mr-2" title="Update Phone">
-                                        <i class="fas fa-phone"></i>
-                                    </button>
-                                    <button onclick="deleteStudent('${escapeHtml(student.id)}')" class="text-red-600 hover:text-red-800" title="Delete Student">
-                                        <i class="fas fa-trash"></i>
-                                    </button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-            
-            <div class="p-4 border-t text-sm text-gray-500 flex justify-between">
-                <span>Active Students: ${activeStudents.length}</span>
-                <span>Left: ${leftStudents.length}</span>
-                <span>Total: ${sortedStudents.length}</span>
-            </div>
-        </div>
     `;
 
-    filterStudentTable();
+    if (totalCount === 0) {
+        html += `
+            <div class="bg-white p-8 rounded-xl text-center border border-gray-200">
+                <i class="fas fa-user-graduate text-gray-300 text-4xl mb-3"></i>
+                <p class="text-gray-500">No student records found in cloud or local storage.</p>
+            </div>
+        </div>`;
+        container.innerHTML = html;
+        return;
+    }
+
+    // Render Tables Grouped by Class
+    classNames.forEach(className => {
+        const cohort = classGroups[className];
+        html += `
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-6">
+                <!-- Class Header & Total Count -->
+                <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+                    <h3 class="text-md font-bold text-indigo-900 flex items-center gap-2">
+                        <i class="fas fa-users text-indigo-600"></i>
+                        Class: ${escapeHtml(className)}
+                    </h3>
+                    <span class="bg-indigo-100 text-indigo-800 text-xs px-2.5 py-1 rounded-full font-bold">
+                        ${cohort.length} ${cohort.length === 1 ? 'Student' : 'Students'}
+                    </span>
+                </div>
+
+                <!-- Class Table -->
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100/70 text-xs font-semibold text-gray-600 uppercase border-b border-gray-200">
+                                <th class="px-4 py-3 border-r">ID</th>
+                                <th class="px-4 py-3 border-r">Name</th>
+                                <th class="px-4 py-3 border-r border-gray-200">Sex</th>
+                                <th class="px-4 py-3 border-r border-gray-200">Parent Phone</th>
+                                <th class="px-4 py-3 border-r border-gray-200">Status</th>
+                                <th class="px-4 py-3 text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="student-table-body" class="divide-y divide-gray-100 text-sm">
+                            ${cohort.map((s, idx) => {
+                                const sId = s.id || s.studentId;
+                                const sName = s.name || s.studentName || '';
+                                const sPhone = s.parentPhone || s.phone || 'N/A';
+                                const isFemale = (s.sex || 'Female').toLowerCase() === 'female';
+
+                                return `
+                                    <tr class="${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-indigo-50/40 transition-colors">
+                                        <td class="px-4 py-3 font-mono font-medium text-gray-700 border-r">${escapeHtml(sId)}</td>
+                                        <td class="px-4 py-3 font-medium text-gray-900 border-r">${escapeHtml(sName)}</td>
+                                        <td class="px-4 py-3 border-r">
+                                            <span class="${isFemale ? 'text-pink-600 font-medium' : 'text-blue-600 font-medium'}">
+                                                <i class="fas ${isFemale ? 'fa-venus' : 'fa-mars'} mr-1"></i>
+                                                ${escapeHtml(s.sex || 'Female')}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 border-r text-gray-600 font-mono text-xs">${escapeHtml(sPhone)}</td>
+                                        <td class="px-4 py-3 border-r">
+                                            <span class="px-2 py-0.5 rounded-full text-xs font-bold ${
+                                                s.status === 'Active' ? 'bg-green-100 text-green-800' : 
+                                                s.status === 'Transfer' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'
+                                            }">
+                                                ${escapeHtml(s.status || 'Active')}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-center">
+                                            <div class="flex justify-center gap-2">
+                                                <button onclick="openEditStudentModal('${escapeHtml(sId)}')" class="p-1.5 text-indigo-600 hover:bg-indigo-100 rounded-lg" title="Edit Student">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <button onclick="openPhoneUpdateModal('${escapeHtml(sId)}')" class="p-1.5 text-amber-600 hover:bg-amber-100 rounded-lg" title="Update Phone">
+                                                    <i class="fas fa-phone"></i>
+                                                </button>
+                                                <button onclick="deleteStudent('${escapeHtml(sId)}')" class="p-1.5 text-red-600 hover:bg-red-100 rounded-lg" title="Delete Student">
+                                                    <i class="fas fa-trash-alt"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    });
+
+    html += `</div>`;
+    container.innerHTML = html;
 }
+window.renderStudentRegistry = renderStudentRegistry;
 
 function filterStudentTable() {
     const searchTerm = document.getElementById('student-search')?.value.toLowerCase().trim() || '';
@@ -2157,59 +2176,75 @@ window.syncAllStudentViews = syncAllStudentViews;
  * Processes Bulk Import with Modal Class Fallback and Permanent Local Storage Persistence
  */
 async function processBulkImport(rawStudentList = null, defaultYear = new Date().getFullYear()) {
-    // 1. Detect selected class from Modal Dropdown (if present)
-    const modalClassSelect = document.getElementById('bulk-import-class') || 
-                             document.getElementById('bulk-class-select') || 
-                             document.getElementById('import-class') ||
-                             document.getElementById('student-class');
-    const selectedModalClass = modalClassSelect ? modalClassSelect.value.trim() : '';
+    // 1. Resolve Class Dropdown from any known HTML Modal ID variant
+    const classSelectors = [
+        'bulk-import-class', 'bulk-class-select', 'import-class', 
+        'student-class', 'modal-student-class', 'select-class'
+    ];
+    let selectedModalClass = '';
 
-    // 2. Fetch data from memory or parameters
+    for (const id of classSelectors) {
+        const el = document.getElementById(id);
+        if (el && el.value && el.value.trim() !== '') {
+            selectedModalClass = el.value.trim();
+            break;
+        }
+    }
+
+    // 2. Fetch raw import data
     const listToProcess = (Array.isArray(rawStudentList) && rawStudentList.length > 0) 
         ? rawStudentList 
         : (window.pendingImportData || []);
 
-    const normalizedList = typeof normalizeBulkImportData === 'function' 
-        ? normalizeBulkImportData(listToProcess, selectedModalClass)
-        : listToProcess;
-
-    if (!normalizedList || normalizedList.length === 0) {
-        if (typeof showToast === 'function') showToast('No valid student data found. Please select a valid file first.', 'error');
+    if (!listToProcess || listToProcess.length === 0) {
+        if (typeof showToast === 'function') showToast('No valid student data found to import.', 'error');
         return;
     }
 
-    // 3. Sort Cohort (Females first, then A-Z)
+    // 3. Normalize & Apply Class Fallback
+    const normalizedList = listToProcess.map(s => {
+        const finalClass = (s.class || s.className || selectedModalClass || 'Unassigned').trim();
+        return {
+            name: s.name || s.studentName || s['Student Name'] || s['Name'] || '',
+            sex: s.sex || s.Sex || s.gender || 'Female',
+            class: finalClass,
+            className: finalClass,
+            parentPhone: s.parentPhone || s.phone || s['Phone'] || s['Parent Phone'] || '',
+            status: s.status || 'Active'
+        };
+    });
+
+    // 4. Sort Cohort (Females first, A-Z)
     const sortedCohort = typeof sortStudentCohort === 'function' 
         ? sortStudentCohort(normalizedList) 
         : normalizedList;
 
-    // 4. Assign Permanent Sequential IDs
+    // 5. Build Final Records
     const preparedStudents = sortedCohort.map((student, index) => {
         const isTransfer = student.status === 'Transfer';
         const permanentId = typeof generatePermanentStudentId === 'function'
             ? generatePermanentStudentId(defaultYear, isTransfer, index)
-            : (student.id || `STU-${defaultYear}-${index + 1}`);
+            : `STU-${defaultYear}-${String(index + 1).padStart(3, '0')}`;
 
         return {
             id: permanentId,
             studentId: permanentId,
             name: student.name,
             studentName: student.name,
-            class: student.class || selectedModalClass || 'Unassigned',
-            className: student.class || selectedModalClass || 'Unassigned',
-            sex: student.sex || 'Female',
-            age: student.age || '',
+            class: student.class,
+            className: student.class,
+            sex: student.sex,
             admissionYear: String(defaultYear),
-            parentPhone: student.parentPhone || '',
-            phone: student.parentPhone || '',
-            status: student.status || 'Active',
+            parentPhone: student.parentPhone,
+            phone: student.parentPhone,
+            status: student.status,
             entryDate: new Date().toISOString().split('T')[0],
             updatedAt: new Date().toISOString()
         };
     });
 
     try {
-        // 5. Batch Save to Firestore
+        // 6. Firestore Batch Write
         if (typeof db !== 'undefined' && db) {
             const batch = db.batch();
             preparedStudents.forEach(st => {
@@ -2219,13 +2254,13 @@ async function processBulkImport(rawStudentList = null, defaultYear = new Date()
             await batch.commit();
         }
 
-        // 6. Merge with Local Cache & Save to Persistent Storage
+        // 7. Update Local Storage & DataService Cache
         let currentStudents = (typeof DataService !== 'undefined' && DataService.get) 
             ? (DataService.get('students') || []) 
             : JSON.parse(localStorage.getItem('students') || '[]');
 
         preparedStudents.forEach(newSt => {
-            const idx = currentStudents.findIndex(s => s.id === newSt.id);
+            const idx = currentStudents.findIndex(s => String(s.id || s.studentId).trim() === String(newSt.id).trim());
             if (idx >= 0) {
                 currentStudents[idx] = newSt;
             } else {
@@ -2233,30 +2268,22 @@ async function processBulkImport(rawStudentList = null, defaultYear = new Date()
             }
         });
 
-        if (typeof sortStudentCohort === 'function') {
-            currentStudents = sortStudentCohort(currentStudents);
-        }
-
-        // Update DataService & LocalStorage
         if (typeof DataService !== 'undefined' && DataService.set) {
             DataService.set('students', currentStudents);
         }
         localStorage.setItem('students', JSON.stringify(currentStudents));
 
-        // Reset memory buffer & close modal
+        // Cleanup
         window.pendingImportData = [];
         if (typeof closeModal === 'function') closeModal();
         if (typeof resetBulkImportUI === 'function') resetBulkImportUI();
 
         if (typeof showToast === 'function') showToast(`Successfully imported ${preparedStudents.length} students!`, 'success');
 
-        // 7. Synchronize UI Views safely
+        // 8. Re-render View Immediately
         if (typeof syncAllStudentViews === 'function') {
             syncAllStudentViews(currentStudents);
-        } else if (typeof window.syncAllStudentViews === 'function') {
-            window.syncAllStudentViews(currentStudents);
         }
-
     } catch (error) {
         console.error('Error during bulk import:', error);
         if (typeof showToast === 'function') showToast('Bulk import failed: ' + error.message, 'error');
