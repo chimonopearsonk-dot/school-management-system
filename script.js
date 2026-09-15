@@ -2108,6 +2108,52 @@ function parseCSVToObjects(csvText) {
 }
 
 /**
+ * Keeps DataService and localStorage synced across tab/view navigation
+ */
+function syncAllStudentViews(studentsList = null) {
+    let students = studentsList;
+
+    if (!students) {
+        if (typeof DataService !== 'undefined' && DataService.get) {
+            students = DataService.get('students');
+        }
+        if (!students || students.length === 0) {
+            students = JSON.parse(localStorage.getItem('students') || '[]');
+        }
+    }
+
+    const sortedStudents = typeof sortStudentCohort === 'function' 
+        ? sortStudentCohort(students || []) 
+        : (students || []);
+
+    // Update memory caches
+    if (typeof DataService !== 'undefined' && DataService.set) {
+        DataService.set('students', sortedStudents);
+    }
+    localStorage.setItem('students', JSON.stringify(sortedStudents));
+
+    // Render Registry View if visible
+    const registryContainer = document.getElementById('student-registry-container') || 
+                              document.getElementById('main-content') || 
+                              document.getElementById('content');
+
+    if (registryContainer && (document.getElementById('student-table-body') || registryContainer.querySelector('table'))) {
+        if (typeof renderStudentRegistry === 'function') {
+            renderStudentRegistry(registryContainer, sortedStudents);
+        }
+    }
+
+    // Render Dashboard View if visible
+    const dashboardContainer = document.getElementById('recent-students-container') || 
+                               document.getElementById('recent-students-list');
+
+    if (dashboardContainer && typeof createRecentStudentsTable === 'function') {
+        dashboardContainer.innerHTML = createRecentStudentsTable(sortedStudents.slice(0, 5));
+    }
+}
+window.syncAllStudentViews = syncAllStudentViews;
+
+/**
  * Processes Bulk Import with Modal Class Fallback and Permanent Local Storage Persistence
  */
 async function processBulkImport(rawStudentList = null, defaultYear = new Date().getFullYear()) {
@@ -2123,20 +2169,26 @@ async function processBulkImport(rawStudentList = null, defaultYear = new Date()
         ? rawStudentList 
         : (window.pendingImportData || []);
 
-    const normalizedList = normalizeBulkImportData(listToProcess, selectedModalClass);
+    const normalizedList = typeof normalizeBulkImportData === 'function' 
+        ? normalizeBulkImportData(listToProcess, selectedModalClass)
+        : listToProcess;
 
     if (!normalizedList || normalizedList.length === 0) {
-        showToast('No valid student data found. Please select a valid file first.', 'error');
+        if (typeof showToast === 'function') showToast('No valid student data found. Please select a valid file first.', 'error');
         return;
     }
 
     // 3. Sort Cohort (Females first, then A-Z)
-    const sortedCohort = sortStudentCohort(normalizedList);
+    const sortedCohort = typeof sortStudentCohort === 'function' 
+        ? sortStudentCohort(normalizedList) 
+        : normalizedList;
 
     // 4. Assign Permanent Sequential IDs
     const preparedStudents = sortedCohort.map((student, index) => {
         const isTransfer = student.status === 'Transfer';
-        const permanentId = generatePermanentStudentId(defaultYear, isTransfer, index);
+        const permanentId = typeof generatePermanentStudentId === 'function'
+            ? generatePermanentStudentId(defaultYear, isTransfer, index)
+            : (student.id || `STU-${defaultYear}-${index + 1}`);
 
         return {
             id: permanentId,
@@ -2181,9 +2233,11 @@ async function processBulkImport(rawStudentList = null, defaultYear = new Date()
             }
         });
 
-        currentStudents = sortStudentCohort(currentStudents);
+        if (typeof sortStudentCohort === 'function') {
+            currentStudents = sortStudentCohort(currentStudents);
+        }
 
-        // Update DataService & LocalStorage so view changes don't lose data
+        // Update DataService & LocalStorage
         if (typeof DataService !== 'undefined' && DataService.set) {
             DataService.set('students', currentStudents);
         }
@@ -2194,14 +2248,18 @@ async function processBulkImport(rawStudentList = null, defaultYear = new Date()
         if (typeof closeModal === 'function') closeModal();
         if (typeof resetBulkImportUI === 'function') resetBulkImportUI();
 
-        showToast(`Successfully imported ${preparedStudents.length} students!`, 'success');
+        if (typeof showToast === 'function') showToast(`Successfully imported ${preparedStudents.length} students!`, 'success');
 
-        // 7. Synchronize UI Views
-        syncAllStudentViews(currentStudents);
+        // 7. Synchronize UI Views safely
+        if (typeof syncAllStudentViews === 'function') {
+            syncAllStudentViews(currentStudents);
+        } else if (typeof window.syncAllStudentViews === 'function') {
+            window.syncAllStudentViews(currentStudents);
+        }
 
     } catch (error) {
         console.error('Error during bulk import:', error);
-        showToast('Bulk import failed: ' + error.message, 'error');
+        if (typeof showToast === 'function') showToast('Bulk import failed: ' + error.message, 'error');
     }
 }
 window.processBulkImport = processBulkImport;
@@ -2351,48 +2409,6 @@ async function findStudentById(targetId) {
         return sId === cleanTargetId;
     }) || null;
 }
-
-/**
- * Keeps DataService and localStorage synced across tab/view navigation
- */
-function syncAllStudentViews(studentsList = null) {
-    let students = studentsList;
-
-    if (!students) {
-        if (typeof DataService !== 'undefined' && DataService.get) {
-            students = DataService.get('students');
-        }
-        if (!students || students.length === 0) {
-            students = JSON.parse(localStorage.getItem('students') || '[]');
-        }
-    }
-
-    const sortedStudents = sortStudentCohort(students || []);
-
-    // Update memory caches
-    if (typeof DataService !== 'undefined' && DataService.set) {
-        DataService.set('students', sortedStudents);
-    }
-    localStorage.setItem('students', JSON.stringify(sortedStudents));
-
-    // Render Registry View if visible
-    const registryContainer = document.getElementById('student-registry-container') || 
-                              document.getElementById('main-content') || 
-                              document.getElementById('content');
-
-    if (registryContainer && (document.getElementById('student-table-body') || registryContainer.querySelector('table'))) {
-        renderStudentRegistry(registryContainer, sortedStudents);
-    }
-
-    // Render Dashboard View if visible
-    const dashboardContainer = document.getElementById('recent-students-container') || 
-                               document.getElementById('recent-students-list');
-
-    if (dashboardContainer) {
-        dashboardContainer.innerHTML = createRecentStudentsTable(sortedStudents.slice(0, 5));
-    }
-}
-window.syncAllStudentViews = syncAllStudentViews;
 
 /**
  * Open Edit Student Modal with Flexible ID Resolution
