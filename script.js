@@ -1437,13 +1437,14 @@ if (typeof DataService !== 'undefined' && !DataService.getStudents) {
 }
 
 /**
- * Renders the Student Registry with Class Grouping, Class Totals, and Persistent Data Retrieval
+ * Main Student Registry Table View
+ * Preserves action buttons, filters, class breakdown totals, and persistent data loading.
  */
-async function renderStudentRegistry(container, studentsList = null) {
+async function renderStudentRegistry(container, passedStudents = null) {
     if (!container) return;
 
-    // 1. Auto-fetch stored data if tab switch or router called function without passing students
-    let students = studentsList;
+    // 1. Data Persistence Fallback (Prevents empty view on tab switches or re-renders)
+    let students = passedStudents;
     if (!students || !Array.isArray(students) || students.length === 0) {
         if (typeof DataService !== 'undefined' && DataService.getStudents) {
             students = await DataService.getStudents();
@@ -1455,12 +1456,20 @@ async function renderStudentRegistry(container, studentsList = null) {
         }
     }
 
-    // Sort cohort (Female first, A-Z)
+    // 2. Prepare Data Summaries & Sorting
     const sortedStudents = typeof sortStudentCohort === 'function' 
-        ? sortStudentCohort(students) 
-        : students;
+        ? sortStudentCohort(students || []) 
+        : (students || []);
 
-    // Group students by Class
+    const activeStudents = sortedStudents.filter(s => s.status !== 'Left');
+    const leftStudents = sortedStudents.filter(s => s.status === 'Left');
+
+    // Extract unique classes for filter dropdown and class breakdown
+    const uniqueClasses = [...new Set(sortedStudents.map(s => s.class || s.className))]
+        .filter(Boolean)
+        .sort();
+
+    // Group students by Class for totals and structured view
     const classGroups = sortedStudents.reduce((groups, student) => {
         const className = (student.class || student.className || 'Unassigned').trim();
         if (!groups[className]) groups[className] = [];
@@ -1468,119 +1477,160 @@ async function renderStudentRegistry(container, studentsList = null) {
         return groups;
     }, {});
 
-    const classNames = Object.keys(classGroups).sort();
-    const totalCount = sortedStudents.length;
+    // Preserve existing input values if re-rendered dynamically
+    const currentSearch = document.getElementById('student-search')?.value || '';
+    const currentClass = document.getElementById('student-class-filter')?.value || '';
+    const currentStatus = document.getElementById('student-status-filter')?.value || 'active';
 
-    // Build Registry HTML Structure
-    let html = `
-        <div id="student-registry-container" class="space-y-6">
-            <!-- Header Summary Bar -->
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100 gap-4">
-                <div>
-                    <h2 class="text-xl font-bold text-gray-800">Student Registry</h2>
-                    <p class="text-sm text-gray-500">Total Registered Students: <span class="font-semibold text-indigo-600">${totalCount}</span></p>
+    // 3. Render HTML Component
+    container.innerHTML = `
+        <div id="student-registry-container" class="bg-white rounded-2xl shadow">
+            
+            <!-- Header Toolbar: Search, Filters, and Action Buttons -->
+            <div class="p-4 border-b space-y-3">
+                <div class="flex flex-wrap gap-3 items-center justify-between">
+                    
+                    <!-- Search & Dropdown Filters -->
+                    <div class="flex flex-wrap gap-3 items-center flex-1">
+                        <div class="flex-1 min-w-[200px]">
+                            <div class="relative">
+                                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                                <input type="text" id="student-search" 
+                                       class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                       placeholder="Search by ID, Name, Class, or Phone..." 
+                                       value="${escapeHtml(currentSearch)}"
+                                       oninput="filterStudentTable()">
+                            </div>
+                        </div>
+                        
+                        <select id="student-class-filter" class="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" onchange="filterStudentTable()">
+                            <option value="">All Classes (${sortedStudents.length})</option>
+                            ${uniqueClasses.map(cls => `<option value="${escapeHtml(cls)}" ${cls === currentClass ? 'selected' : ''}>${escapeHtml(cls)} (${classGroups[cls]?.length || 0})</option>`).join('')}
+                        </select>
+                        
+                        <select id="student-status-filter" class="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" onchange="filterStudentTable()">
+                            <option value="active" ${currentStatus === 'active' ? 'selected' : ''}>Active Only</option>
+                            <option value="left" ${currentStatus === 'left' ? 'selected' : ''}>Left Only</option>
+                            <option value="all" ${currentStatus === 'all' ? 'selected' : ''}>All (including Left)</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Main Action Buttons -->
+                    <div class="flex gap-2 flex-wrap">
+                        <button id="refresh-students-btn" onclick="refreshStudentRegistry()" class="bg-gray-100 text-gray-700 border border-gray-300 px-3.5 py-2.5 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1.5" title="Refresh data from cloud">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                        <button onclick="showAddStudentModal()" class="bg-indigo-600 text-white px-4 py-2.5 rounded-lg hover:bg-indigo-700 flex items-center gap-2 font-medium">
+                            <i class="fas fa-plus"></i> Add Student
+                        </button>
+                        <button onclick="showTransferStudentModal()" class="bg-purple-600 text-white px-4 py-2.5 rounded-lg hover:bg-purple-700 flex items-center gap-2 font-medium">
+                            <i class="fas fa-arrow-right"></i> Transfer In
+                        </button>
+                        <button onclick="showBulkUploadModal()" class="bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium">
+                            <i class="fas fa-upload"></i> Bulk Import
+                        </button>
+                        <button onclick="exportStudentsToCSV()" class="bg-slate-700 text-white px-4 py-2.5 rounded-lg hover:bg-slate-800 flex items-center gap-2 font-medium" title="Export Register to CSV">
+                            <i class="fas fa-file-excel"></i> Export CSV
+                        </button>
+                    </div>
                 </div>
-                <div class="flex flex-wrap gap-2">
-                    ${classNames.map(cls => `
-                        <span class="px-3 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-full border border-indigo-100">
-                            ${escapeHtml(cls)}: ${classGroups[cls].length}
+
+                <!-- Class Breakdown Badges -->
+                ${uniqueClasses.length > 0 ? `
+                <div class="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
+                    <span class="text-xs font-semibold text-gray-500 self-center mr-1">Class Totals:</span>
+                    ${uniqueClasses.map(cls => `
+                        <span class="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-full border border-indigo-100">
+                            ${escapeHtml(cls)}: <strong>${classGroups[cls]?.length || 0}</strong>
                         </span>
                     `).join('')}
                 </div>
+                ` : ''}
             </div>
+            
+            <!-- Table View -->
+            <div class="overflow-x-auto">
+                <table class="table w-full border-collapse">
+                    <thead>
+                        <tr class="bg-gray-50 border-b">
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Student ID</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Full Name</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Class</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Sex</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Parent Phone</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Status</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="student-table-body">
+                        ${sortedStudents.length === 0 ? `
+                            <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">No students found in registry. Click "+ Add Student" or "Refresh".</td></tr>
+                        ` : sortedStudents.map((student, index) => {
+                            const sId = student.id || student.studentId || '';
+                            const sName = student.name || student.studentName || '';
+                            const sClass = student.class || student.className || 'Unassigned';
+                            const sPhone = student.parentPhone || student.phone || '';
+                            const isFemale = String(student.sex || '').toLowerCase() === 'female';
+
+                            return `
+                                <tr class="${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-indigo-50 ${student.status === 'Left' ? 'opacity-60' : ''}" 
+                                    data-id="${escapeHtml(sId)}" 
+                                    data-status="${escapeHtml(student.status || 'Active')}"
+                                    data-class="${escapeHtml(sClass)}">
+                                    <td class="px-4 py-3 text-sm font-mono font-medium text-gray-700">${escapeHtml(sId || 'N/A')}</td>
+                                    <td class="px-4 py-3 text-sm font-medium text-gray-900">${escapeHtml(sName)}</td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <span class="px-2.5 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-semibold">${escapeHtml(sClass)}</span>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <span class="${isFemale ? 'text-pink-600 font-medium' : 'text-blue-600 font-medium'}">
+                                            <i class="fas ${isFemale ? 'fa-venus' : 'fa-mars'} mr-1"></i>
+                                            ${escapeHtml(student.sex || 'Female')}
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <span class="font-mono text-xs text-gray-600">
+                                            ${sPhone ? escapeHtml(typeof formatPhoneForDisplay === 'function' ? formatPhoneForDisplay(sPhone) : sPhone) : 'N/A'}
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <span class="px-2.5 py-1 ${student.status === 'Active' ? 'bg-green-100 text-green-800' : student.status === 'Transfer' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'} rounded-full text-xs font-semibold">
+                                            ${escapeHtml(student.status || 'Active')}
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <div class="flex items-center gap-2">
+                                            <button onclick="openEditStudentModal('${escapeHtml(sId)}')" class="p-1 text-blue-600 hover:text-blue-800 rounded" title="Edit Student">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                            <button onclick="openPhoneUpdateModal('${escapeHtml(sId)}')" class="p-1 text-amber-600 hover:text-amber-800 rounded" title="Update Phone">
+                                                <i class="fas fa-phone"></i>
+                                            </button>
+                                            <button onclick="deleteStudent('${escapeHtml(sId)}')" class="p-1 text-red-600 hover:text-red-800 rounded" title="Delete Student">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Summary Footer -->
+            <div class="p-4 border-t text-sm text-gray-500 flex flex-wrap justify-between gap-2 bg-gray-50/50 rounded-b-2xl">
+                <span><strong>Active Students:</strong> ${activeStudents.length}</span>
+                <span><strong>Left:</strong> ${leftStudents.length}</span>
+                <span><strong>Total Registered:</strong> ${sortedStudents.length}</span>
+            </div>
+        </div>
     `;
 
-    if (totalCount === 0) {
-        html += `
-            <div class="bg-white p-8 rounded-xl text-center border border-gray-200">
-                <i class="fas fa-user-graduate text-gray-300 text-4xl mb-3"></i>
-                <p class="text-gray-500">No student records found in cloud or local storage.</p>
-            </div>
-        </div>`;
-        container.innerHTML = html;
-        return;
+    // 4. Apply filter state instantly after DOM updates
+    if (typeof filterStudentTable === 'function') {
+        filterStudentTable();
     }
-
-    // Render Tables Grouped by Class
-    classNames.forEach(className => {
-        const cohort = classGroups[className];
-        html += `
-            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-6">
-                <!-- Class Header & Total Count -->
-                <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
-                    <h3 class="text-md font-bold text-indigo-900 flex items-center gap-2">
-                        <i class="fas fa-users text-indigo-600"></i>
-                        Class: ${escapeHtml(className)}
-                    </h3>
-                    <span class="bg-indigo-100 text-indigo-800 text-xs px-2.5 py-1 rounded-full font-bold">
-                        ${cohort.length} ${cohort.length === 1 ? 'Student' : 'Students'}
-                    </span>
-                </div>
-
-                <!-- Class Table -->
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="bg-gray-100/70 text-xs font-semibold text-gray-600 uppercase border-b border-gray-200">
-                                <th class="px-4 py-3 border-r">ID</th>
-                                <th class="px-4 py-3 border-r">Name</th>
-                                <th class="px-4 py-3 border-r border-gray-200">Sex</th>
-                                <th class="px-4 py-3 border-r border-gray-200">Parent Phone</th>
-                                <th class="px-4 py-3 border-r border-gray-200">Status</th>
-                                <th class="px-4 py-3 text-center">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="student-table-body" class="divide-y divide-gray-100 text-sm">
-                            ${cohort.map((s, idx) => {
-                                const sId = s.id || s.studentId;
-                                const sName = s.name || s.studentName || '';
-                                const sPhone = s.parentPhone || s.phone || 'N/A';
-                                const isFemale = (s.sex || 'Female').toLowerCase() === 'female';
-
-                                return `
-                                    <tr class="${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-indigo-50/40 transition-colors">
-                                        <td class="px-4 py-3 font-mono font-medium text-gray-700 border-r">${escapeHtml(sId)}</td>
-                                        <td class="px-4 py-3 font-medium text-gray-900 border-r">${escapeHtml(sName)}</td>
-                                        <td class="px-4 py-3 border-r">
-                                            <span class="${isFemale ? 'text-pink-600 font-medium' : 'text-blue-600 font-medium'}">
-                                                <i class="fas ${isFemale ? 'fa-venus' : 'fa-mars'} mr-1"></i>
-                                                ${escapeHtml(s.sex || 'Female')}
-                                            </span>
-                                        </td>
-                                        <td class="px-4 py-3 border-r text-gray-600 font-mono text-xs">${escapeHtml(sPhone)}</td>
-                                        <td class="px-4 py-3 border-r">
-                                            <span class="px-2 py-0.5 rounded-full text-xs font-bold ${
-                                                s.status === 'Active' ? 'bg-green-100 text-green-800' : 
-                                                s.status === 'Transfer' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'
-                                            }">
-                                                ${escapeHtml(s.status || 'Active')}
-                                            </span>
-                                        </td>
-                                        <td class="px-4 py-3 text-center">
-                                            <div class="flex justify-center gap-2">
-                                                <button onclick="openEditStudentModal('${escapeHtml(sId)}')" class="p-1.5 text-indigo-600 hover:bg-indigo-100 rounded-lg" title="Edit Student">
-                                                    <i class="fas fa-edit"></i>
-                                                </button>
-                                                <button onclick="openPhoneUpdateModal('${escapeHtml(sId)}')" class="p-1.5 text-amber-600 hover:bg-amber-100 rounded-lg" title="Update Phone">
-                                                    <i class="fas fa-phone"></i>
-                                                </button>
-                                                <button onclick="deleteStudent('${escapeHtml(sId)}')" class="p-1.5 text-red-600 hover:bg-red-100 rounded-lg" title="Delete Student">
-                                                    <i class="fas fa-trash-alt"></i>
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                `;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        `;
-    });
-
-    html += `</div>`;
-    container.innerHTML = html;
 }
 window.renderStudentRegistry = renderStudentRegistry;
 
